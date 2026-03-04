@@ -11,39 +11,41 @@ func formatAgentError(err error) string {
 	raw := err.Error()
 	lower := strings.ToLower(raw)
 
-	// 1. Context overflow
+	// 1. Timeout — must be checked BEFORE context overflow because
+	// "context deadline exceeded" contains both "context" and "exceeded",
+	// which would false-positive match the context overflow heuristic.
+	if containsAny(lower, "timeout", "timed out", "deadline exceeded") {
+		return "⚠️ Request timed out. Please try again."
+	}
+
+	// 2. Context overflow
 	if isContextOverflowError(lower) {
 		return "⚠️ Context overflow — message too large for this model. Try /new to start a fresh session."
 	}
 
-	// 2. Role ordering / message format errors (tool_use_id mismatch, roles must alternate, etc.)
+	// 3. Role ordering / message format errors (tool_use_id mismatch, roles must alternate, etc.)
 	if isMessageFormatError(lower) {
 		return "⚠️ Session history conflict — please try again. If this persists, use /new to start a fresh session."
 	}
 
-	// 3. Rate limit
+	// 4. Rate limit
 	if containsAny(lower, "rate limit", "rate_limit", "too many requests", "429", "quota exceeded", "resource_exhausted") {
 		return "⚠️ API rate limit reached. Please try again later."
 	}
 
-	// 4. Overloaded
+	// 5. Overloaded
 	if strings.Contains(lower, "overloaded") {
 		return "⚠️ The AI service is temporarily overloaded. Please try again in a moment."
 	}
 
-	// 5. Billing
+	// 6. Billing
 	if containsAny(lower, "billing", "insufficient credits", "credit balance", "payment required", "402") {
 		return "⚠️ API billing error — your API key may have run out of credits. Check your provider's billing dashboard."
 	}
 
-	// 6. Auth errors
+	// 7. Auth errors
 	if containsAny(lower, "invalid api key", "invalid_api_key", "unauthorized", "forbidden", "authentication", "401", "403", "access denied") {
 		return "⚠️ Authentication error. Please check your API key configuration."
-	}
-
-	// 7. Timeout
-	if containsAny(lower, "timeout", "timed out", "deadline exceeded") {
-		return "⚠️ Request timed out. Please try again."
 	}
 
 	// 8. Model config
