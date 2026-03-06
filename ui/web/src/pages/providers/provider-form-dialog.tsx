@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Dialog,
@@ -19,21 +19,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, ExternalLink, CheckCircle, ClipboardPaste } from "lucide-react";
 import type { ProviderData, ProviderInput } from "./hooks/use-providers";
-import { useHttp } from "@/hooks/use-ws";
-import { toast } from "@/stores/use-toast-store";
 import { slugify, isValidSlug } from "@/lib/slug";
 import { PROVIDER_TYPES } from "@/constants/providers";
+import { OAuthSection } from "./provider-oauth-section";
+import { CLISection } from "./provider-cli-section";
 
 interface ProviderFormDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   provider: ProviderData | null; // null = create mode
   onSubmit: (data: ProviderInput) => Promise<unknown>;
+  existingProviders?: ProviderData[];
 }
 
-export function ProviderFormDialog({ open, onOpenChange, provider, onSubmit }: ProviderFormDialogProps) {
+export function ProviderFormDialog({ open, onOpenChange, provider, onSubmit, existingProviders = [] }: ProviderFormDialogProps) {
   const isEdit = !!provider;
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
@@ -45,7 +45,11 @@ export function ProviderFormDialog({ open, onOpenChange, provider, onSubmit }: P
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Only one Claude CLI provider allowed per instance
+  const hasClaudeCLI = !isEdit && existingProviders.some((p) => p.provider_type === "claude_cli");
+
   const isOAuth = providerType === "chatgpt_oauth";
+  const isCLI = providerType === "claude_cli";
 
   useEffect(() => {
     if (open) {
@@ -104,35 +108,22 @@ export function ProviderFormDialog({ open, onOpenChange, provider, onSubmit }: P
         <div className="space-y-4 py-4 overflow-y-auto min-h-0">
           {/* Provider type selector — always shown in create mode */}
           {!isEdit && (
-            <div className="space-y-2">
-              <Label>Provider Type *</Label>
-              <Select
-                value={providerType}
-                onValueChange={(v) => {
-                  setProviderType(v);
-                  const preset = PROVIDER_TYPES.find((t) => t.value === v);
-                  setApiBase(preset?.apiBase || "");
-                  if (v === "chatgpt_oauth") {
-                    setName("openai-codex");
-                    setDisplayName("ChatGPT (OAuth)");
-                  } else {
-                    if (name === "openai-codex") setName("");
-                    if (displayName === "ChatGPT (OAuth)") setDisplayName("");
-                  }
-                }}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PROVIDER_TYPES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <ProviderTypeSelect
+              value={providerType}
+              hasClaudeCLI={hasClaudeCLI}
+              onChange={(v) => {
+                setProviderType(v);
+                const preset = PROVIDER_TYPES.find((t) => t.value === v);
+                setApiBase(preset?.apiBase || "");
+                if (v === "chatgpt_oauth") {
+                  setName("openai-codex");
+                  setDisplayName("ChatGPT (OAuth)");
+                } else {
+                  if (name === "openai-codex") setName("");
+                  if (displayName === "ChatGPT (OAuth)") setDisplayName("");
+                }
+              }}
+            />
           )}
 
           {isOAuth ? (
@@ -192,31 +183,39 @@ export function ProviderFormDialog({ open, onOpenChange, provider, onSubmit }: P
                 </div>
               )}
 
-              <div className="space-y-2">
-                <Label htmlFor="apiBase">API Base URL</Label>
-                <Input
-                  id="apiBase"
-                  value={apiBase}
-                  onChange={(e) => setApiBase(e.target.value)}
-                  placeholder={PROVIDER_TYPES.find((t) => t.value === providerType)?.placeholder || PROVIDER_TYPES.find((t) => t.value === providerType)?.apiBase || "https://api.example.com/v1"}
-                />
-              </div>
+              {/* Claude CLI section */}
+              {isCLI && <CLISection open={open} />}
 
-              <div className="space-y-2">
-                <Label htmlFor="apiKey">API Key</Label>
-                <Input
-                  id="apiKey"
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={isEdit ? "Leave as-is or enter new key" : "sk-..."}
-                />
-                {isEdit && apiKey === "***" && (
-                  <p className="text-xs text-muted-foreground">
-                    API key is set. Clear and type a new value to change it.
-                  </p>
-                )}
-              </div>
+              {/* Standard provider fields (not shown for Claude CLI) */}
+              {!isCLI && (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="apiBase">API Base URL</Label>
+                    <Input
+                      id="apiBase"
+                      value={apiBase}
+                      onChange={(e) => setApiBase(e.target.value)}
+                      placeholder={PROVIDER_TYPES.find((t) => t.value === providerType)?.placeholder || PROVIDER_TYPES.find((t) => t.value === providerType)?.apiBase || "https://api.example.com/v1"}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="apiKey">API Key</Label>
+                    <Input
+                      id="apiKey"
+                      type="password"
+                      value={apiKey}
+                      onChange={(e) => setApiKey(e.target.value)}
+                      placeholder={isEdit ? "Leave as-is or enter new key" : "sk-..."}
+                    />
+                    {isEdit && apiKey === "***" && (
+                      <p className="text-xs text-muted-foreground">
+                        API key is set. Clear and type a new value to change it.
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
 
               <div className="flex items-center justify-between">
                 <Label htmlFor="enabled">Enabled</Label>
@@ -246,228 +245,35 @@ export function ProviderFormDialog({ open, onOpenChange, provider, onSubmit }: P
   );
 }
 
-// --- OAuth section shown inside the dialog when chatgpt_oauth is selected ---
+// --- Provider type select dropdown ---
 
-interface OAuthStatus {
-  authenticated: boolean;
-  provider_name?: string;
-  error?: string;
-}
-
-interface StartResponse {
-  auth_url?: string;
-  status?: string;
-}
-
-function OAuthSection({ onSuccess }: { onSuccess: () => void }) {
-  const http = useHttp();
-  const [status, setStatus] = useState<OAuthStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [starting, setStarting] = useState(false);
-  const [waitingCallback, setWaitingCallback] = useState(false);
-  const [pasteUrl, setPasteUrl] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [justAuthenticated, setJustAuthenticated] = useState(false);
-  const [countdown, setCountdown] = useState(0);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const stopPolling = () => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
-  };
-
-  const fetchStatus = useCallback(async () => {
-    try {
-      const res = await http.get<OAuthStatus>("/v1/auth/openai/status");
-      setStatus(res);
-      return res;
-    } catch {
-      setStatus(null);
-      return null;
-    } finally {
-      setLoading(false);
-    }
-  }, [http]);
-
-  useEffect(() => {
-    fetchStatus();
-    return stopPolling;
-  }, [fetchStatus]);
-
-  // Countdown timer — auto-close dialog after auth success
-  useEffect(() => {
-    if (!justAuthenticated) return;
-    setCountdown(3);
-    const iv = setInterval(() => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          clearInterval(iv);
-          onSuccess();
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(iv);
-  }, [justAuthenticated, onSuccess]);
-
-  const showSuccess = () => {
-    setWaitingCallback(false);
-    setJustAuthenticated(true);
-  };
-
-  const handleStart = async () => {
-    setStarting(true);
-    try {
-      const res = await http.post<StartResponse>("/v1/auth/openai/start");
-      if (res.status === "already_authenticated") {
-        await fetchStatus();
-        showSuccess();
-        return;
-      }
-      if (res.auth_url) {
-        window.open(res.auth_url, "_blank", "noopener,noreferrer");
-        setWaitingCallback(true);
-        setPasteUrl("");
-        pollRef.current = setInterval(async () => {
-          const s = await fetchStatus();
-          if (s?.authenticated) {
-            stopPolling();
-            showSuccess();
-          }
-        }, 2000);
-        timeoutRef.current = setTimeout(() => {
-          stopPolling();
-          setWaitingCallback(false);
-        }, 6 * 60 * 1000);
-      }
-    } catch (err) {
-      toast.error("OAuth failed", err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setStarting(false);
-    }
-  };
-
-  const handlePasteSubmit = async () => {
-    const url = pasteUrl.trim();
-    if (!url) return;
-    setSubmitting(true);
-    try {
-      await http.post("/v1/auth/openai/callback", { redirect_url: url });
-      stopPolling();
-      setPasteUrl("");
-      await fetchStatus();
-      showSuccess();
-    } catch (err) {
-      toast.error("Exchange failed", err instanceof Error ? err.message : "Invalid redirect URL");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await http.post("/v1/auth/openai/logout");
-      setStatus({ authenticated: false });
-      toast.success("Logged out", "OpenAI OAuth token removed");
-    } catch (err) {
-      toast.error("Logout failed", err instanceof Error ? err.message : "Unknown error");
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Checking authentication status...
-      </div>
-    );
-  }
-
-  // Just authenticated — show success with countdown
-  if (justAuthenticated) {
-    return (
-      <div className="space-y-3 py-2">
-        <div className="flex items-center gap-2 rounded-md border border-green-500/30 bg-green-500/5 px-4 py-3 text-sm text-green-700 dark:text-green-400">
-          <CheckCircle className="h-5 w-5 shrink-0" />
-          <div>
-            <p className="font-medium">Authentication successful!</p>
-            <p className="text-xs mt-0.5 opacity-80">
-              Provider <code className="rounded bg-muted px-1 font-mono text-xs">openai-codex</code> is
-              now active. Closing in {countdown}s...
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Already authenticated (opened dialog when already authed)
-  if (status?.authenticated) {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 rounded-md border border-green-500/30 bg-green-500/5 px-3 py-2 text-sm text-green-700 dark:text-green-400">
-          <CheckCircle className="h-4 w-4 shrink-0" />
-          <span>
-            Authenticated — provider <code className="rounded bg-muted px-1 font-mono text-xs">openai-codex</code> active
-          </span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Use model prefix <code className="rounded bg-muted px-1 font-mono">openai-codex/</code> in
-          agent config (e.g. openai-codex/gpt-4o). Token refreshes automatically.
-        </p>
-        <Button variant="outline" size="sm" onClick={handleLogout} className="gap-1.5">
-          Remove Token
-        </Button>
-      </div>
-    );
-  }
-
+function ProviderTypeSelect({ value, hasClaudeCLI, onChange }: {
+  value: string;
+  hasClaudeCLI: boolean;
+  onChange: (value: string) => void;
+}) {
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
-        Sign in with your ChatGPT account to use your subscription's models
-        without a separate API key.
-      </p>
-      {waitingCallback ? (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 rounded-md border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-sm text-blue-700 dark:text-blue-400">
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-            <span>Waiting for authentication... Complete sign-in in the opened window.</span>
-          </div>
-          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              <strong>Remote/VPS?</strong> After signing in, your browser will try to open{" "}
-              <code className="text-xs">localhost:1455</code> and show a{" "}
-              <strong>&quot;Can&apos;t reach this page&quot;</strong> error.
-              That&apos;s normal — <strong>copy the full URL from the browser address bar</strong> and paste it below.
-            </p>
-            <div className="flex gap-2">
-              <Input
-                placeholder="http://localhost:1455/auth/callback?code=...&state=..."
-                value={pasteUrl}
-                onChange={(e) => setPasteUrl(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handlePasteSubmit()}
-                className="text-xs font-mono h-8"
-              />
-              <Button
-                size="sm"
-                onClick={handlePasteSubmit}
-                disabled={submitting || !pasteUrl.trim()}
-                className="gap-1.5 shrink-0 h-8"
-              >
-                {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ClipboardPaste className="h-3.5 w-3.5" />}
-                Submit
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <Button size="sm" onClick={handleStart} disabled={starting} className="gap-1.5">
-          {starting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
-          {starting ? "Starting..." : "Sign in with ChatGPT"}
-        </Button>
-      )}
+    <div className="space-y-2">
+      <Label>Provider Type *</Label>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PROVIDER_TYPES.map((t) => (
+            <SelectItem
+              key={t.value}
+              value={t.value}
+              disabled={t.value === "claude_cli" && hasClaudeCLI}
+            >
+              {t.label}
+              {t.value === "claude_cli" && hasClaudeCLI && (
+                <span className="ml-1 text-xs opacity-60">(already added)</span>
+              )}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }

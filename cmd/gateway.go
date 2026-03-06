@@ -370,7 +370,8 @@ func runGateway() {
 
 	// Register providers from DB (overrides config providers).
 	if pgStores.Providers != nil {
-		registerProvidersFromDB(providerRegistry, pgStores.Providers, pgStores.ConfigSecrets)
+		dbGatewayAddr := loopbackAddr(cfg.Gateway.Host, cfg.Gateway.Port)
+		registerProvidersFromDB(providerRegistry, pgStores.Providers, pgStores.ConfigSecrets, dbGatewayAddr, cfg.Gateway.Token)
 	}
 
 	// Wire embedding provider to PGMemoryStore so IndexDocument generates vectors.
@@ -580,7 +581,8 @@ func runGateway() {
 	}
 
 	contextFileInterceptor, delegateMgr = wireExtras(pgStores, agentRouter, providerRegistry, msgBus, pgStores.Sessions, toolsReg, toolPE, skillsLoader, hasMemory, traceCollector, workspace, cfg.Gateway.InjectionAction, cfg, sandboxMgr, dynamicLoader)
-	agentsH, skillsH, tracesH, mcpH, customToolsH, channelInstancesH, providersH, delegationsH, builtinToolsH := wireHTTP(pgStores, cfg.Gateway.Token, msgBus, toolsReg, providerRegistry, permPE.IsOwner)
+	gatewayAddr := loopbackAddr(cfg.Gateway.Host, cfg.Gateway.Port)
+	agentsH, skillsH, tracesH, mcpH, customToolsH, channelInstancesH, providersH, delegationsH, builtinToolsH := wireHTTP(pgStores, cfg.Gateway.Token, msgBus, toolsReg, providerRegistry, permPE.IsOwner, gatewayAddr)
 	if agentsH != nil {
 		server.SetAgentsHandler(agentsH)
 	}
@@ -954,6 +956,9 @@ func runGateway() {
 		// Stop channels and cron
 		channelMgr.StopAll(context.Background())
 		pgStores.Cron.Stop()
+
+		// Close provider resources (e.g. Claude CLI temp files)
+		providerRegistry.Close()
 
 		// Stop sandbox pruning + release containers
 		if sandboxMgr != nil {

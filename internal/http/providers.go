@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -18,11 +19,13 @@ type ProvidersHandler struct {
 	secretStore store.ConfigSecretsStore
 	token       string
 	providerReg *providers.Registry
+	gatewayAddr string     // for injecting MCP bridge into Claude CLI providers
+	cliMu       sync.Mutex // serializes Claude CLI provider create to prevent duplicates
 }
 
 // NewProvidersHandler creates a handler for provider management endpoints.
-func NewProvidersHandler(s store.ProviderStore, secretStore store.ConfigSecretsStore, token string, providerReg *providers.Registry) *ProvidersHandler {
-	return &ProvidersHandler{store: s, secretStore: secretStore, token: token, providerReg: providerReg}
+func NewProvidersHandler(s store.ProviderStore, secretStore store.ConfigSecretsStore, token string, providerReg *providers.Registry, gatewayAddr string) *ProvidersHandler {
+	return &ProvidersHandler{store: s, secretStore: secretStore, token: token, providerReg: providerReg, gatewayAddr: gatewayAddr}
 }
 
 // RegisterRoutes registers all provider management routes on the given mux.
@@ -39,6 +42,9 @@ func (h *ProvidersHandler) RegisterRoutes(mux *http.ServeMux) {
 
 	// Provider + model verification (pre-flight check)
 	mux.HandleFunc("POST /v1/providers/{id}/verify", h.auth(h.handleVerifyProvider))
+
+	// Claude CLI auth status (global — not per-provider)
+	mux.HandleFunc("GET /v1/providers/claude-cli/auth-status", h.auth(h.handleClaudeCLIAuthStatus))
 }
 
 func (h *ProvidersHandler) auth(next http.HandlerFunc) http.HandlerFunc {
@@ -63,7 +69,29 @@ func maskAPIKey(p *store.LLMProviderData) {
 // registerInMemory adds (or replaces) a provider in the in-memory registry
 // so it's immediately usable for verify/chat without a gateway restart.
 func (h *ProvidersHandler) registerInMemory(p *store.LLMProviderData) {
-	if h.providerReg == nil || !p.Enabled || p.APIKey == "" {
+	if h.providerReg == nil || !p.Enabled {
+		return
+	}
+	// Claude CLI doesn't need an API key — register immediately
+	if p.ProviderType == store.ProviderClaudeCLI {
+		cliPath := p.APIBase // reuse APIBase field for CLI path
+		if cliPath == "" {
+			cliPath = "claude"
+		}
+		var cliOpts []providers.ClaudeCLIOption
+		cliOpts = append(cliOpts, providers.WithClaudeCLISecurityHooks("", true))
+		if h.gatewayAddr != "" {
+			mcpPath, mcpCleanup, mcpErr := providers.BuildCLIMCPConfig(nil, h.gatewayAddr, h.token)
+			if mcpErr != nil {
+				slog.Warn("failed to build MCP config for in-memory claude-cli", "error", mcpErr)
+			} else if mcpPath != "" {
+				cliOpts = append(cliOpts, providers.WithClaudeCLIMCPConfig(mcpPath, mcpCleanup))
+			}
+		}
+		h.providerReg.Register(providers.NewClaudeCLIProvider(cliPath, cliOpts...))
+		return
+	}
+	if p.APIKey == "" {
 		return
 	}
 	if p.ProviderType == store.ProviderChatGPTOAuth {
@@ -124,6 +152,23 @@ func (h *ProvidersHandler) handleCreateProvider(w http.ResponseWriter, r *http.R
 	if !store.ValidProviderTypes[p.ProviderType] {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unsupported provider_type"})
 		return
+	}
+
+	// Only one Claude CLI provider is allowed per instance (1 machine = 1 auth session).
+	// Mutex serializes check+create to prevent TOCTOU race.
+	if p.ProviderType == store.ProviderClaudeCLI {
+		h.cliMu.Lock()
+		defer h.cliMu.Unlock()
+
+		existing, _ := h.store.ListProviders(r.Context())
+		for _, ep := range existing {
+			if ep.ProviderType == store.ProviderClaudeCLI {
+				writeJSON(w, http.StatusConflict, map[string]string{
+					"error": "A Claude CLI provider already exists. Only one is allowed per instance.",
+				})
+				return
+			}
+		}
 	}
 
 	if err := h.store.CreateProvider(r.Context(), &p); err != nil {

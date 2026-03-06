@@ -11,6 +11,7 @@ import { AgentFilesTab } from "./agent-files-tab";
 import { AgentSharesTab } from "./agent-shares-tab";
 import { AgentLinksTab } from "./agent-links-tab";
 import { AgentSkillsTab } from "./agent-skills-tab";
+import { AgentDangerTab } from "./agent-danger-tab";
 import { SummoningModal } from "../summoning-modal";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { DeferredSpinner } from "@/components/shared/loading-skeleton";
@@ -37,9 +38,9 @@ function agentSubtitle(agent: { display_name?: string; agent_key: string; id: st
 }
 
 export function AgentDetailPage({ agentId, onBack }: AgentDetailPageProps) {
-  const { agent, files, loading, updateAgent, getFile, setFile, regenerateAgent, resummonAgent, refresh } =
+  const { agent, files, loading, updateAgent, getFile, setFile, regenerateAgent, resummonAgent, deleteAgent, refresh } =
     useAgentDetail(agentId);
-  const { deleteAgent } = useAgents();
+  const { deleteAgent: deleteAgentById } = useAgents();
   const [summoningOpen, setSummoningOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -130,6 +131,7 @@ export function AgentDetailPage({ agentId, onBack }: AgentDetailPageProps) {
             <TabsTrigger value="shares">Shares</TabsTrigger>
             <TabsTrigger value="links">Links</TabsTrigger>
             <TabsTrigger value="skills">Skills</TabsTrigger>
+            <TabsTrigger value="danger" className="text-destructive data-[state=active]:text-destructive">Danger</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="mt-4">
@@ -162,6 +164,10 @@ export function AgentDetailPage({ agentId, onBack }: AgentDetailPageProps) {
           <TabsContent value="skills" className="mt-4">
             <AgentSkillsTab agentId={agentId} />
           </TabsContent>
+
+          <TabsContent value="danger" className="mt-4">
+            <AgentDangerTab agent={agent} onDelete={deleteAgent} onDeleted={onBack} />
+          </TabsContent>
         </Tabs>
       </div>
 
@@ -182,7 +188,7 @@ export function AgentDetailPage({ agentId, onBack }: AgentDetailPageProps) {
         confirmLabel="Delete"
         variant="destructive"
         onConfirm={async () => {
-          await deleteAgent(agentId);
+          await deleteAgentById(agentId);
           setDeleteOpen(false);
           onBack();
         }}

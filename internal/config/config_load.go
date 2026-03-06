@@ -143,6 +143,11 @@ func (c *Config) applyEnvOverrides() {
 		c.Channels.WhatsApp.Enabled = true
 	}
 
+	// Claude CLI provider
+	envStr("GOCLAW_CLAUDE_CLI_PATH", &c.Providers.ClaudeCLI.CLIPath)
+	envStr("GOCLAW_CLAUDE_CLI_MODEL", &c.Providers.ClaudeCLI.Model)
+	envStr("GOCLAW_CLAUDE_CLI_WORK_DIR", &c.Providers.ClaudeCLI.BaseWorkDir)
+
 	// Default provider/model: env overrides config.
 	envStr("GOCLAW_PROVIDER", &c.Agents.Defaults.Provider)
 	envStr("GOCLAW_MODEL", &c.Agents.Defaults.Model)

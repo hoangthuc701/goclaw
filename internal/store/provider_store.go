@@ -23,6 +23,7 @@ const (
 	ProviderDashScope       = "dashscope"
 	ProviderBailian         = "bailian"
 	ProviderChatGPTOAuth    = "chatgpt_oauth"
+	ProviderClaudeCLI       = "claude_cli"
 )
 
 // ValidProviderTypes lists all accepted provider_type values.
@@ -41,6 +42,7 @@ var ValidProviderTypes = map[string]bool{
 	ProviderDashScope:       true,
 	ProviderBailian:         true,
 	ProviderChatGPTOAuth:    true,
+	ProviderClaudeCLI:       true,
 }
 
 // LLMProviderData represents an LLM provider configuration.

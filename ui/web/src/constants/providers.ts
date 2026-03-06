@@ -20,4 +20,5 @@ export const PROVIDER_TYPES: ProviderTypeInfo[] = [
   { value: "perplexity", label: "Perplexity", apiBase: "https://api.perplexity.ai", placeholder: "" },
   { value: "dashscope", label: "DashScope (Qwen)", apiBase: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1", placeholder: "" },
   { value: "bailian", label: "Bailian Coding", apiBase: "https://coding-intl.dashscope.aliyuncs.com/v1", placeholder: "" },
+  { value: "claude_cli", label: "Claude CLI (Local)", apiBase: "", placeholder: "" },
 ];

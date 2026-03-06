@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
 // ModelInfo is a normalized model entry returned by the list-models endpoint.
@@ -33,6 +34,12 @@ func (h *ProvidersHandler) handleListProviderModels(w http.ResponseWriter, r *ht
 	p, err := h.store.GetProvider(r.Context(), id)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "provider not found"})
+		return
+	}
+
+	// Claude CLI doesn't need an API key — return hardcoded models
+	if p.ProviderType == store.ProviderClaudeCLI {
+		writeJSON(w, http.StatusOK, map[string]interface{}{"models": claudeCLIModels()})
 		return
 	}
 
@@ -172,6 +179,15 @@ func minimaxModels() []ModelInfo {
 		{ID: "MiniMax-Text-01", Name: "MiniMax Text 01"},
 		{ID: "MiniMax-M1", Name: "MiniMax M1"},
 		{ID: "MiniMax-M2.5", Name: "MiniMax M2.5"},
+	}
+}
+
+// claudeCLIModels returns the model aliases accepted by the Claude CLI.
+func claudeCLIModels() []ModelInfo {
+	return []ModelInfo{
+		{ID: "sonnet", Name: "Sonnet"},
+		{ID: "opus", Name: "Opus"},
+		{ID: "haiku", Name: "Haiku"},
 	}
 }
 

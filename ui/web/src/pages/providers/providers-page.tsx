@@ -199,6 +199,7 @@ export function ProvidersPage() {
         onOpenChange={setFormOpen}
         provider={editProvider}
         onSubmit={editProvider ? handleEdit : handleCreate}
+        existingProviders={providers}
       />
 
       <ConfirmDialog
