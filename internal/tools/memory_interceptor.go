@@ -13,6 +13,17 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
+// effectiveWorkspace returns the per-user workspace from ctx if available,
+// falling back to the interceptor's base workspace.
+// This ensures memory path detection and normalization work correctly
+// for per-user workspaces (e.g. workspace/channel/userID/).
+func effectiveWorkspace(ctx context.Context, baseWorkspace string) string {
+	if ws := ToolWorkspaceFromCtx(ctx); ws != "" {
+		return ws
+	}
+	return baseWorkspace
+}
+
 // isMemoryDir checks if a path refers to the memory directory itself.
 // Handles "memory", "./memory", "/workspace/memory" etc.
 func isMemoryDir(path, workspace string) bool {
@@ -84,7 +95,8 @@ func (m *MemoryInterceptor) SetKGExtractFunc(fn KGExtractFunc) {
 // ReadFile attempts to read a memory file from the DB.
 // Returns (content, true, nil) if handled, or ("", false, nil) if not a memory path.
 func (m *MemoryInterceptor) ReadFile(ctx context.Context, path string) (string, bool, error) {
-	if !isMemoryPath(path, m.workspace) {
+	ws := effectiveWorkspace(ctx, m.workspace)
+	if !isMemoryPath(path, ws) {
 		return "", false, nil
 	}
 
@@ -94,7 +106,7 @@ func (m *MemoryInterceptor) ReadFile(ctx context.Context, path string) (string, 
 	}
 
 	// Normalize absolute path to workspace-relative for DB storage
-	relPath := normalizeToRelative(path, m.workspace)
+	relPath := normalizeToRelative(path, ws)
 
 	userID := store.MemoryUserID(ctx)
 	agentStr := agentID.String()
@@ -124,7 +136,8 @@ type MemoryWriteResult struct {
 // matching TS behavior where only .md files are indexed.
 // Returns MemoryWriteResult with Handled=true if this was a memory path, KGTriggered=true if KG extraction was started.
 func (m *MemoryInterceptor) WriteFile(ctx context.Context, path, content string) (MemoryWriteResult, error) {
-	if !isMemoryPath(path, m.workspace) {
+	ws := effectiveWorkspace(ctx, m.workspace)
+	if !isMemoryPath(path, ws) {
 		return MemoryWriteResult{}, nil
 	}
 
@@ -134,7 +147,7 @@ func (m *MemoryInterceptor) WriteFile(ctx context.Context, path, content string)
 	}
 
 	// Normalize absolute path to workspace-relative for DB storage
-	relPath := normalizeToRelative(path, m.workspace)
+	relPath := normalizeToRelative(path, ws)
 
 	userID := store.MemoryUserID(ctx)
 	agentStr := agentID.String()
@@ -166,7 +179,8 @@ func (m *MemoryInterceptor) WriteFile(ctx context.Context, path, content string)
 // ListFiles lists memory documents from the DB when path is the memory directory.
 // Returns (listing, true, nil) if handled, or ("", false, nil) if not a memory path.
 func (m *MemoryInterceptor) ListFiles(ctx context.Context, path string) (string, bool, error) {
-	if !isMemoryDir(path, m.workspace) {
+	ws := effectiveWorkspace(ctx, m.workspace)
+	if !isMemoryDir(path, ws) {
 		return "", false, nil
 	}
 
