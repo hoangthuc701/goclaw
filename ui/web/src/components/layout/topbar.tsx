@@ -68,7 +68,7 @@ export function Topbar() {
           <select
             value={language}
             onChange={handleLanguageChange}
-            className="cursor-pointer bg-transparent text-xs outline-none"
+            className="cursor-pointer bg-transparent text-xs outline-none dark:scheme-dark"
           >
             {SUPPORTED_LANGUAGES.map((lang) => (
               <option key={lang} value={lang}>{LANGUAGE_LABELS[lang]}</option>
@@ -81,7 +81,7 @@ export function Topbar() {
           <select
             value={timezone}
             onChange={(e) => setTimezone(e.target.value)}
-            className="cursor-pointer bg-transparent text-xs outline-none"
+            className="cursor-pointer bg-transparent text-xs outline-none dark:scheme-dark"
           >
             {TIMEZONE_OPTIONS.map((tz) => (
               <option key={tz.value} value={tz.value}>{tz.label}</option>
