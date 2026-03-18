@@ -1,0 +1,20 @@
+{
+  "newChat": "新しいチャット",
+  "openSessions": "セッションを開く",
+  "readOnly": "読み取り専用 — このセッションは別のユーザーのものです",
+  "empty": {
+    "title": "会話を始める",
+    "description": "メッセージを送信してエージェントとチャットを開始してください。"
+  },
+  "media": {
+    "image": "画像",
+    "video": "動画",
+    "audio": "音声",
+    "voice": "ボイスメッセージ",
+    "document": "ドキュメント",
+    "animation": "アニメーション",
+    "attached": "添付済み"
+  },
+  "forwardedFrom": "転送元",
+  "replyingTo": "返信先"
+}
