@@ -30,7 +30,8 @@ export function AgentSelector({ value, onChange }: AgentSelectorProps) {
         setAgents(active);
         // Auto-select first agent if current value doesn't match any active agent
         if (active.length > 0 && !active.some((a) => a.agent_key === value)) {
-          onChange(active[0]!.agent_key);
+          const defaultAgent = active.find((a) => a.is_default) ?? active[0]!;
+          onChange(defaultAgent.agent_key);
         }
       })
       .catch(() => {});
