@@ -237,7 +237,7 @@ func (t *CronTool) handleAdd(ctx context.Context, args map[string]any, agentID, 
 	if !deliver {
 		if ctxChannel := ToolChannelFromCtx(ctx); ctxChannel != "" {
 			switch ctxChannel {
-			case "cli", "system", "subagent", "cron", "delegate":
+			case "cli", "system", "subagent", "cron", "teammate":
 				// internal channels — don't auto-deliver
 			default:
 				deliver = true

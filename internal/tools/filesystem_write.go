@@ -61,7 +61,9 @@ func (t *WriteFileTool) SetSandboxKey(key string) {}
 
 func (t *WriteFileTool) Name() string { return "write_file" }
 func (t *WriteFileTool) Description() string {
-	return "Write content to a file, creating directories as needed"
+	return "Write content to a file, creating directories as needed. " +
+		"IMPORTANT: content longer than ~12000 characters may be truncated by the API. " +
+		"For large files, use the edit tool to build the file in sections, or split into multiple write_file calls with append=true."
 }
 func (t *WriteFileTool) Parameters() map[string]any {
 	return map[string]any{
@@ -75,6 +77,10 @@ func (t *WriteFileTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Content to write",
 			},
+			"append": map[string]any{
+				"type":        "boolean",
+				"description": "Append content to the file instead of overwriting. Use this to build large files in chunks.",
+			},
 			"deliver": map[string]any{
 				"type":        "boolean",
 				"description": "Deliver this file to the user as an attachment. Defaults to true. Set to false for intermediate/temporary files (e.g. config, cache, temp scripts).",
@@ -87,6 +93,7 @@ func (t *WriteFileTool) Parameters() map[string]any {
 func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) *Result {
 	path, _ := args["path"].(string)
 	content, _ := args["content"].(string)
+	appendMode, _ := args["append"].(bool)
 	deliver := true
 	if v, ok := args["deliver"].(bool); ok {
 		deliver = v
@@ -165,7 +172,17 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) *Resul
 		return ErrorResult(fmt.Sprintf("failed to create directory: %v", err))
 	}
 
-	if err := os.WriteFile(resolved, []byte(content), 0644); err != nil {
+	if appendMode {
+		f, err := os.OpenFile(resolved, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			return ErrorResult(fmt.Sprintf("failed to open file for append: %v", err))
+		}
+		_, err = f.WriteString(content)
+		f.Close()
+		if err != nil {
+			return ErrorResult(fmt.Sprintf("failed to append to file: %v", err))
+		}
+	} else if err := os.WriteFile(resolved, []byte(content), 0644); err != nil {
 		return ErrorResult(fmt.Sprintf("failed to write file: %v", err))
 	}
 
@@ -173,7 +190,11 @@ func (t *WriteFileTool) Execute(ctx context.Context, args map[string]any) *Resul
 		t.workspaceIntc.AfterWrite(ctx, resolved, "write")
 	}
 
-	msg := fmt.Sprintf("File written: %s (%d bytes)", path, len(content))
+	verb := "written"
+	if appendMode {
+		verb = "appended"
+	}
+	msg := fmt.Sprintf("File %s: %s (%d bytes)", verb, path, len(content))
 	if deliver {
 		msg += ". File will be automatically delivered to the user — do NOT send it again via message tool."
 	}

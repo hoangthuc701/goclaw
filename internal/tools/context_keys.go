@@ -34,7 +34,7 @@ const (
 const (
 	ChannelSystem    = "system"
 	ChannelDashboard = "dashboard"
-	ChannelDelegate  = "delegate"
+	ChannelTeammate  = "teammate"
 )
 
 // MediaPathLoader resolves a media ID to a local file path.

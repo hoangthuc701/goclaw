@@ -112,7 +112,7 @@ flowchart TD
 | `internal/skills/` | SKILL.md loader (5-tier hierarchy) + BM25 search + hot-reload via fsnotify |
 | `internal/channels/` | Channel manager + adapters: Telegram (forum topics, STT, bot commands), Feishu/Lark (streaming cards, media), Zalo OA, Zalo Personal, Discord, WhatsApp, Slack |
 | `internal/mcp/` | MCP server bridge (stdio, SSE, streamable-HTTP transports) |
-| `internal/scheduler/` | Lane-based concurrency control (main, subagent, cron, delegate lanes) with per-session serialization |
+| `internal/scheduler/` | Lane-based concurrency control (main, subagent, cron, team lanes) with per-session serialization |
 | `internal/memory/` | Memory system (pgvector hybrid search) |
 | `internal/permissions/` | RBAC policy engine (admin, operator, viewer roles) |
 | `internal/store/pg/pairing.go` | DM/device pairing service (8-character codes, database-backed) |
@@ -276,7 +276,7 @@ flowchart TD
         S1[Subagent executions]
     end
 
-    subgraph Del["Lane: delegate (concurrency 100)"]
+    subgraph Del["Lane: team (concurrency 100)"]
         D1[Delegation executions]
     end
 
@@ -303,7 +303,7 @@ flowchart TD
 |------|:-----------:|-------------|---------|
 | `main` | 30 | `GOCLAW_LANE_MAIN` | Primary user chat sessions |
 | `subagent` | 50 | `GOCLAW_LANE_SUBAGENT` | Spawned subagents |
-| `delegate` | 100 | `GOCLAW_LANE_DELEGATE` | Agent delegation executions |
+| `team` | 100 | `GOCLAW_LANE_TEAM` | Agent team/delegation executions |
 | `cron` | 30 | `GOCLAW_LANE_CRON` | Scheduled cron jobs |
 
 ### Session Queue Concurrency
@@ -392,7 +392,7 @@ flowchart TD
 | `cmd/gateway.go` | Gateway startup orchestrator (`runGateway()`) |
 | `cmd/gateway_managed.go` | Database wiring (`wireManagedExtras()`, `wireManagedHTTP()`) |
 | `cmd/gateway_callbacks.go` | Shared callbacks (user seeding, context file loading) |
-| `cmd/gateway_consumer.go` | Inbound message consumer (subagent, delegate, teammate routing) |
+| `cmd/gateway_consumer.go` | Inbound message consumer (subagent, teammate routing) |
 | `cmd/gateway_providers.go` | Provider registration (config-based + DB-based) |
 | `cmd/gateway_methods.go` | RPC method registration |
 | `internal/config/config.go` | Config struct definitions |

@@ -340,6 +340,9 @@ func buildToolingSection(toolNames []string, hasSandbox bool, shellDenyGroups ma
 	}
 	lines = append(lines,
 		"",
+		"IMPORTANT: write_file content longer than ~12000 characters may be truncated by the API.",
+		"For large files, use append=true to build the file in chunks, or use the edit tool to modify sections.",
+		"",
 		"IMPORTANT: The tool list above is the AUTHORITATIVE set of currently available tools, re-evaluated every turn.",
 		"If earlier messages in this conversation say a tool is \"not available\" or \"not configured\", IGNORE those statements — they are outdated.",
 		"Only this system prompt reflects the current tool availability. Trust this list, not conversation history.",

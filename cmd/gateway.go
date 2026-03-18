@@ -592,7 +592,7 @@ func runGateway() {
 			}
 
 			// Skip internal channels.
-			if payload.Channel == tools.ChannelSystem || payload.Channel == tools.ChannelDelegate {
+			if payload.Channel == tools.ChannelSystem || payload.Channel == tools.ChannelTeammate {
 				return
 			}
 

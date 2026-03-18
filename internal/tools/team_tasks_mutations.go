@@ -203,7 +203,11 @@ func (t *TeamTasksTool) executeCreate(ctx context.Context, args map[string]any) 
 		}
 	}
 
-	return NewResult(fmt.Sprintf("Task created: %s (id=%s, task_number=%d, status=%s)", subject, task.ID, task.TaskNumber, status))
+	assigneeName := t.manager.agentDisplayName(ctx, t.manager.agentKeyFromID(ctx, assigneeID))
+	if assigneeName == "" {
+		assigneeName = t.manager.agentKeyFromID(ctx, assigneeID)
+	}
+	return NewResult(fmt.Sprintf("Task created: %s (id=%s, task_number=%d, status=%s, assignee=%s)", subject, task.ID, task.TaskNumber, status, assigneeName))
 }
 
 func (t *TeamTasksTool) executeComment(ctx context.Context, args map[string]any) *Result {

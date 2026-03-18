@@ -110,10 +110,11 @@ func (m *TeamToolManager) dispatchTaskToAgent(ctx context.Context, task *store.T
 		"origin_peer_kind": originPeerKind,
 		"origin_chat_id":   originChatID,
 		"origin_user_id":   originUserID,
-		"from_agent":       fromAgent,
-		"to_agent":         ag.AgentKey,
-		"team_task_id":     task.ID.String(),
-		"team_id":          teamID.String(),
+		"from_agent":          fromAgent,
+		"to_agent":            ag.AgentKey,
+		"to_agent_display":    ag.DisplayName,
+		"team_task_id":        task.ID.String(),
+		"team_id":             teamID.String(),
 	}
 	// Resolve local key from context; fallback to task metadata for deferred dispatches.
 	localKey := ToolLocalKeyFromCtx(ctx)

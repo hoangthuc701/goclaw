@@ -45,7 +45,7 @@ A Go port of [OpenClaw](https://github.com/openclaw/openclaw) with enhanced secu
 | Prompt caching             | —                                    | —                                            | —                                     | ✅ Anthropic + OpenAI-compat   |
 | Knowledge graph            | —                                    | —                                            | —                                     | ✅ LLM extraction + traversal  |
 | Skill system               | ✅ Embeddings/semantic               | ✅ SKILL.md + TOML                           | ✅ Basic                              | ✅ BM25 + pgvector hybrid      |
-| Lane-based scheduler       | ✅                                   | Bounded concurrency                          | —                                     | ✅ (main/subagent/delegate/cron + concurrent group runs) |
+| Lane-based scheduler       | ✅                                   | Bounded concurrency                          | —                                     | ✅ (main/subagent/team/cron + concurrent group runs) |
 | Messaging channels         | 37+                                  | 15+                                          | 10+                                   | 7+                             |
 | Companion apps             | macOS, iOS, Android                  | Python SDK                                   | —                                     | Web dashboard                  |
 | Live Canvas / Voice        | ✅ (A2UI + TTS/STT)                  | —                                            | Voice transcription                   | TTS (4 providers)              |
@@ -74,10 +74,10 @@ graph TB
         direction TB
         WS["WebSocket RPC"] & REST["HTTP Server"] & CM["Channel Manager"]
         WS & REST & CM --> BUS["Message Bus"]
-        BUS --> SCHED["Lane-based Scheduler<br/>main · subagent · delegate · cron"]
+        BUS --> SCHED["Lane-based Scheduler<br/>main · subagent · team · cron"]
         SCHED --> ROUTER["Agent Router"]
         ROUTER --> LOOP["Agent Loop<br/>think → act → observe"]
-        LOOP --> TOOLS["Tool Registry<br/>fs · exec · web · memory · delegate · team · mcp · custom"]
+        LOOP --> TOOLS["Tool Registry<br/>fs · exec · web · memory · team · mcp · custom"]
         LOOP --> LLM["LLM Providers<br/>Anthropic (native + prompt caching) · OpenAI-compat (12+)"]
     end
 
@@ -96,6 +96,8 @@ graph TB
 GoClaw supports four orchestration patterns for agent collaboration, all managed through explicit permission links.
 
 ### Agent Delegation
+
+> **Note:** The standalone `delegate` tool has been removed. Delegation is now managed through agent teams — leads create tasks on the shared board and spawn members explicitly. The patterns below describe the conceptual model; see [Agent Teams](#agent-teams) for current tooling.
 
 Agent delegation enables named agents to delegate tasks to other agents — each running with its own identity, tools, LLM provider, and context files. Unlike subagents (anonymous clones of the parent), delegation targets are fully independent agents.
 
@@ -241,7 +243,7 @@ flowchart TD
 - **Agent delegation** — Sync/async inter-agent task delegation with permission links, concurrency limits, and per-user restrictions
 - **Agent teams** — Shared task boards with dependencies, team mailbox, and coordinated multi-agent workflows
 - **Delegation history** — Queryable audit trail of all inter-agent delegations
-- **Concurrent execution** — Lane-based scheduler (main/subagent/delegate/cron), adaptive throttle for group chats
+- **Concurrent execution** — Lane-based scheduler (main/subagent/team/cron), adaptive throttle for group chats
 
 ### Tools & Integrations
 - **60+ built-in tools** — File system, shell exec, web search/fetch, memory, browser automation, TTS, and more
@@ -555,7 +557,7 @@ When `GOCLAW_*_API_KEY` environment variables are set, the gateway automatically
 | ---------------------- | ---------------------------- | ------- |
 | `GOCLAW_LANE_MAIN`     | Main lane concurrency        | `30`    |
 | `GOCLAW_LANE_SUBAGENT` | Subagent lane concurrency    | `50`    |
-| `GOCLAW_LANE_DELEGATE` | Delegation lane concurrency  | `100`   |
+| `GOCLAW_LANE_TEAM`     | Team lane concurrency        | `100`   |
 | `GOCLAW_LANE_CRON`     | Cron lane concurrency        | `30`    |
 
 </details>
@@ -794,7 +796,7 @@ This creates `.env` with `GOCLAW_ENCRYPTION_KEY` and `GOCLAW_GATEWAY_TOKEN` pre-
 | `tts`              | —             | Text-to-Speech synthesis                                     |
 | `spawn`            | —             | Spawn a subagent                                             |
 | `subagents`        | sessions      | Control running subagents                                    |
-| `delegate`         | orchestration | Delegate tasks to other agents (sync/async, cancel, list)    |
+| ~~`delegate`~~     | orchestration | ~~Delegate tasks to other agents~~ (removed — use `team_tasks`) |
 | `team_tasks`       | teams         | Shared task board (list, create, claim, complete, search)    |
 | `team_message`     | teams         | Team mailbox (send, broadcast, read)                         |
 | `sessions_list`    | sessions      | List active sessions                                         |
@@ -906,7 +908,7 @@ GOCLAW_OPENROUTER_API_KEY=sk-or-xxx go test -v ./tests/integration/ -timeout 120
 - **WebSocket RPC protocol (v3)** — Connect handshake, chat streaming, event push all tested with web dashboard and integration tests.
 - **Store layer (PostgreSQL)** — All PG stores (sessions, agents, providers, skills, cron, pairing, tracing, memory, teams) implemented and running.
 - **Browser automation** — Rod/CDP integration for headless Chrome, tested in production agent workflows.
-- **Lane-based scheduler** — Main/subagent/delegate/cron lane isolation with concurrent execution tested. Group chats support up to 3 concurrent agent runs per session with adaptive throttle and deferred session writes for history isolation.
+- **Lane-based scheduler** — Main/subagent/team/cron lane isolation with concurrent execution tested. Group chats support up to 3 concurrent agent runs per session with adaptive throttle and deferred session writes for history isolation.
 - **Security hardening** — Rate limiting, prompt injection detection, CORS, shell deny patterns, SSRF protection, credential scrubbing all implemented and verified.
 - **Web dashboard** — Channel management, agent management, pairing approval, traces & spans viewer, skills, MCP, cron, sessions, teams, and config pages all implemented and working.
 - **Prompt caching** — Anthropic (explicit `cache_control`), OpenAI/MiniMax/OpenRouter (automatic). Cache metrics tracked in trace spans and displayed in web dashboard.

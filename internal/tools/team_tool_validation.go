@@ -166,7 +166,7 @@ func (m *TeamToolManager) notifyLeaderCycleError(ctx context.Context, teamID uui
 	// Resolve routing: use context channel/chatID if available, fallback to dashboard.
 	channel := ToolChannelFromCtx(ctx)
 	chatID := ToolChatIDFromCtx(ctx)
-	if channel == "" || channel == ChannelSystem || channel == ChannelDelegate {
+	if channel == "" || channel == ChannelSystem || channel == ChannelTeammate {
 		channel = "dashboard"
 		chatID = teamID.String()
 	}

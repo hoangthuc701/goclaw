@@ -112,9 +112,7 @@ Context keys ensure each tool call receives the correct per-call values without 
 
 ### Delegation (group: `delegation`)
 
-| Tool | Description |
-|------|-------------|
-| `delegate` | Delegate task to another agent (actions: delegate, cancel, list, history) |
+> The `delegate` tool has been removed. Delegation is now handled via agent teams using `team_tasks` and `team_message`.
 
 ### Teams (group: `teams`)
 
@@ -368,7 +366,7 @@ flowchart TD
 | `knowledge` | `knowledge_graph_search`, `skill_search` |
 | `automation` | `cron`, `datetime` |
 | `messaging` | `message`, `create_forum_topic` |
-| `delegation` | `delegate` |
+| `delegation` | ~~`delegate`~~ (removed) |
 | `teams` | `team_tasks`, `team_message` |
 | `media_gen` | `create_image`, `create_audio`, `create_video`, `tts` |
 | `media_read` | `read_image`, `read_audio`, `read_document`, `read_video` |
@@ -437,11 +435,13 @@ Results are announced back to the parent agent via the message bus, optionally b
 
 ## 7. Delegation System
 
+> **Note:** The `delegate` tool has been removed. The `DelegateManager` described below is deprecated/removed. Delegation is now handled via agent teams: leads create tasks on the shared board (`team_tasks`) and spawn member agents explicitly. See [11-agent-teams.md](11-agent-teams.md) for the current model.
+
 Delegation allows named agents to delegate tasks to other fully independent agents (each with its own identity, tools, provider, model, and context files). Unlike subagents (anonymous clones), delegation crosses agent boundaries via explicit permission links.
 
-### DelegateManager
+### DelegateManager (Removed)
 
-The subagent system in `internal/tools/subagent_spawn_tool.go` orchestrates all delegation operations:
+The `delegate` tool and its `DelegateManager` in `internal/tools/subagent_spawn_tool.go` have been removed. Previously supported actions:
 
 | Action | Mode | Behavior |
 |--------|------|----------|
