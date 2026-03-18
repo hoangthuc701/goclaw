@@ -1,0 +1,32 @@
+{
+  "title": "コンタクト",
+  "description": "すべてのチャンネルインタラクションから自動収集されたコンタクト。",
+  "searchPlaceholder": "名前、ユーザー名、またはIDで検索...",
+  "filter": "フィルター",
+  "emptyTitle": "コンタクトがありません",
+  "emptyDescription": "ユーザーがチャンネルを通じてエージェントと対話するとコンタクトが表示されます。",
+  "noMatchTitle": "一致するコンタクトがありません",
+  "noMatchDescription": "別の検索キーワードまたはフィルターをお試しください。",
+  "columns": {
+    "name": "名前",
+    "username": "ユーザー名",
+    "senderId": "送信者ID",
+    "channelType": "チャンネル",
+    "peerKind": "タイプ",
+    "lastSeen": "最終確認"
+  },
+  "permissionsNote": {
+    "title": "コンタクト名のチャンネル権限",
+    "telegram": "Telegram — 名前とユーザー名は自動的に利用可能。",
+    "discord": "Discord — 表示名とユーザー名は自動的に利用可能。",
+    "zalo": "Zalo — 表示名は自動的に利用可能。",
+    "slack": "Slack — 表示名はSlack API経由で解決（ボットがワークスペースに参加している必要あり）。",
+    "feishu": "Feishu/Lark — contact:user.base:readonly権限が必要です。この権限がないと名前は空になります。"
+  },
+  "filters": {
+    "allChannels": "すべてのチャンネル",
+    "allTypes": "すべてのタイプ",
+    "direct": "ダイレクト",
+    "group": "グループ"
+  }
+}

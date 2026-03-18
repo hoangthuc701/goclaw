@@ -1,0 +1,102 @@
+{
+  "title": "Cron",
+  "description": "定期的なエージェントタスクをスケジュール",
+  "newJob": "新規ジョブ",
+  "emptyTitle": "Cronジョブがありません",
+  "emptyDescription": "Cronジョブを作成して定期的なエージェントタスクをスケジュールしてください。",
+  "columns": {
+    "enabled": "有効",
+    "name": "名前",
+    "schedule": "スケジュール",
+    "message": "メッセージ",
+    "agent": "エージェント",
+    "actions": "操作"
+  },
+  "runNow": "今すぐ実行",
+  "running": "実行中...",
+  "runHistory": "実行履歴",
+  "defaultAgent": "デフォルト",
+  "create": {
+    "title": "Cronジョブを作成",
+    "name": "名前",
+    "namePlaceholder": "my-daily-task",
+    "nameHint": "小文字、数字、ハイフンのみ",
+    "agentId": "エージェントID（任意）",
+    "agentIdPlaceholder": "default",
+    "scheduleType": "スケジュールタイプ",
+    "every": "毎",
+    "cron": "Cron",
+    "once": "一回",
+    "intervalSeconds": "インターバル（秒）",
+    "cronExpression": "Cron式",
+    "cronHint": "標準5フィールドcron: 分 時 日 月 曜日",
+    "onceDesc": "ジョブは約1分後に一度だけ実行されます。",
+    "message": "メッセージ",
+    "messagePlaceholder": "エージェントに何をさせますか？",
+    "cancel": "キャンセル",
+    "create": "作成",
+    "creating": "作成中..."
+  },
+  "enable": {
+    "title": "Cronジョブを有効化",
+    "description": "「{{name}}」を有効化しますか？スケジュール通りに実行が開始されます。",
+    "confirmLabel": "有効化"
+  },
+  "disable": {
+    "title": "Cronジョブを無効化",
+    "description": "「{{name}}」を無効化しますか？再有効化されるまで実行が停止します。",
+    "confirmLabel": "無効化"
+  },
+  "delete": {
+    "title": "Cronジョブを削除",
+    "description": "「{{name}}」を削除しますか？この操作は取り消せません。",
+    "confirmLabel": "削除"
+  },
+  "runLog": {
+    "title": "実行ログ: {{name}}",
+    "noHistory": "実行履歴がまだありません。",
+    "loading": "読み込み中..."
+  },
+  "detail": {
+    "runNow": "今すぐ実行",
+    "running": "実行中...",
+    "disable": "無効化",
+    "enable": "有効化",
+    "delete": "削除",
+    "enabled": "有効",
+    "disabled": "無効",
+    "runningStatus": "実行中...",
+    "payload": "ペイロード",
+    "empty": "（空）",
+    "deliverDirect": "配信: ダイレクト",
+    "channel": "チャンネル: {{name}}",
+    "to": "宛先: {{name}}",
+    "lastError": "最後のエラー",
+    "runHistory": "実行履歴",
+    "refresh": "更新",
+    "noHistory": "実行履歴がまだありません。",
+    "inOut": "{{input}} 入力 / {{output}} 出力",
+    "infoRows": {
+      "schedule": "スケジュール",
+      "timezone": "タイムゾーン",
+      "nextRun": "次回実行",
+      "lastRun": "最終実行",
+      "created": "作成日",
+      "updated": "更新日",
+      "autoDelete": "自動削除",
+      "autoDeleteValue": "はい（一回限り）"
+    }
+  },
+  "toast": {
+    "created": "Cronジョブが作成されました",
+    "createdDesc": "{{name}}が追加されました",
+    "enabled": "Cronジョブが有効化されました",
+    "disabled": "Cronジョブが無効化されました",
+    "deleted": "Cronジョブが削除されました",
+    "triggered": "Cronジョブがトリガーされました",
+    "failedCreate": "Cronジョブの作成に失敗しました",
+    "failedToggle": "Cronジョブの切り替えに失敗しました",
+    "failedDelete": "Cronジョブの削除に失敗しました",
+    "failedRun": "Cronジョブの実行に失敗しました"
+  }
+}
