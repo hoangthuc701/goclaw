@@ -81,6 +81,22 @@ else
   echo "  [exists]    GOCLAW_GATEWAY_TOKEN"
 fi
 
+# 4. Auto-generate POSTGRES_PASSWORD if missing (required by docker-compose.postgres.yml)
+current_pg="$(get_env_val POSTGRES_PASSWORD)"
+if [ -z "$current_pg" ]; then
+  new_pg="$(gen_hex 16)"
+  set_env_val "POSTGRES_PASSWORD" "$new_pg"
+  echo "  [generated] POSTGRES_PASSWORD"
+else
+  echo "  [exists]    POSTGRES_PASSWORD"
+fi
+
+# 5. Restrict .env file permissions (secrets should not be world-readable)
+if [[ "$OSTYPE" != "msys" && "$OSTYPE" != "cygwin" && "$OSTYPE" != "win32" ]]; then
+  chmod 600 "$ENV_FILE"
+  echo "  [hardened]  .env permissions set to 600"
+fi
+
 echo ""
 echo "=== Done ==="
 echo ""

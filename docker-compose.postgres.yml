@@ -14,7 +14,7 @@ services:
       - "${POSTGRES_PORT:-5432}:5432"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-goclaw}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-goclaw}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (run ./prepare-env.sh)}
       POSTGRES_DB: ${POSTGRES_DB:-goclaw}
     volumes:
       - postgres-data:/var/lib/postgresql
@@ -30,7 +30,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      - GOCLAW_POSTGRES_DSN=postgres://${POSTGRES_USER:-goclaw}:${POSTGRES_PASSWORD:-goclaw}@postgres:5432/${POSTGRES_DB:-goclaw}?sslmode=disable
+      - GOCLAW_POSTGRES_DSN=postgres://${POSTGRES_USER:-goclaw}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-goclaw}?sslmode=disable
     volumes:
       - goclaw-skills:/app/skills
       - goclaw-workspace:/app/.goclaw
