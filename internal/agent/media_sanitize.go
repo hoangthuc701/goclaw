@@ -9,6 +9,8 @@ import (
 	"os"
 
 	"github.com/disintegration/imaging"
+	_ "golang.org/x/image/bmp"  // register BMP decoder
+	_ "golang.org/x/image/webp" // register WebP decoder
 )
 
 // Image sanitization constants (moved from telegram/image_sanitize.go).
