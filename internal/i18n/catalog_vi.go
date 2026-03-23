@@ -93,9 +93,6 @@ func init() {
 		MsgAgentIsTeamLead:      "agent đã là trưởng nhóm",
 		MsgCannotRemoveTeamLead: "không thể xóa trưởng nhóm",
 
-		// Delegations
-		MsgDelegationsUnavailable: "ủy quyền không khả dụng",
-
 		// Channels
 		MsgCannotDeleteDefaultInst: "không thể xóa phiên bản channel mặc định",
 
@@ -172,10 +169,17 @@ func init() {
 		MsgToolSkillManage:     "Tạo, sửa hoặc xóa kỹ năng từ trải nghiệm hội thoại",
 		MsgToolPublishSkill:    "Đăng ký thư mục kỹ năng vào hệ thống, cho phép tìm kiếm và cấp quyền",
 		MsgToolTeamTasks:       "Xem, tạo, cập nhật và hoàn thành tác vụ trên bảng tác vụ nhóm",
-		MsgToolTeamMessage:     "Gửi tin nhắn trực tiếp hoặc broadcast đến đồng đội trong nhóm agent",
 
 		MsgSkillNudgePostscript: "Tác vụ này cần nhiều bước. Bạn muốn tôi lưu quy trình này thành kỹ năng tái sử dụng không? Trả lời **\"lưu kỹ năng\"** hoặc **\"bỏ qua\"**.",
 		MsgSkillNudge70Pct:      "[System] Bạn đã dùng 70% ngân sách vòng lặp. Cân nhắc xem các mẫu trong phiên này có nên lưu thành kỹ năng không.",
 		MsgSkillNudge90Pct:      "[System] Bạn đã dùng 90% ngân sách vòng lặp. Nếu phiên này có quy trình tái sử dụng, hãy cân nhắc lưu thành kỹ năng trước khi hoàn thành.",
+
+		MsgInvalidRole: "vai trò không hợp lệ: giá trị cho phép là owner, admin, operator, member, viewer",
+
+		MsgContactIDsRequired:  "contact_ids là bắt buộc",
+		MsgMergeTargetRequired: "cần chính xác một trong tenant_user_id hoặc create_user",
+		MsgTenantUserNotFound:  "không tìm thấy tenant user",
+		MsgTenantMismatch:      "tenant user không thuộc tenant này",
+		MsgTenantScopeRequired: "cần xác định tenant để thực hiện thao tác này",
 	})
 }

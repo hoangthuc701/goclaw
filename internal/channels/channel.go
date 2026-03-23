@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
@@ -25,6 +27,7 @@ var InternalChannels = map[string]bool{
 	"system":   true,
 	"subagent": true,
 	"browser":  true,
+	"ws":       true, // WebSocket — responses delivered via events/RPC, not outbound dispatch
 }
 
 // IsInternalChannel checks if a channel name is internal.
@@ -155,6 +158,7 @@ type BaseChannel struct {
 	running          bool
 	allowList        []string
 	agentID          string                 // for DB instances: routes to specific agent (empty = use resolveAgentRoute)
+	tenantID         uuid.UUID              // for DB instances: tenant scope (zero = master tenant fallback)
 	contactCollector *store.ContactCollector // optional: auto-collect contacts from channel messages
 }
 
@@ -189,6 +193,12 @@ func (c *BaseChannel) AgentID() string { return c.agentID }
 
 // SetAgentID sets the explicit agent ID for routing (used by InstanceLoader for DB instances).
 func (c *BaseChannel) SetAgentID(id string) { c.agentID = id }
+
+// TenantID returns the tenant UUID for this channel (zero = master tenant fallback).
+func (c *BaseChannel) TenantID() uuid.UUID { return c.tenantID }
+
+// SetTenantID sets the tenant scope (used by InstanceLoader for DB instances).
+func (c *BaseChannel) SetTenantID(id uuid.UUID) { c.tenantID = id }
 
 // SetContactCollector sets the contact collector for auto-collecting contacts from messages.
 func (c *BaseChannel) SetContactCollector(cc *store.ContactCollector) { c.contactCollector = cc }
@@ -324,10 +334,22 @@ func (c *BaseChannel) HandleMessage(senderID, chatID, content string, media []st
 		PeerKind: peerKind,
 		UserID:   userID,
 		Metadata: metadata,
+		TenantID: c.tenantID,
 		AgentID:  c.agentID,
 	}
 
 	c.bus.PublishInbound(msg)
+}
+
+// GroupMember represents a member of a group chat.
+type GroupMember struct {
+	MemberID string `json:"member_id"`
+	Name     string `json:"name"`
+}
+
+// GroupMemberProvider is optionally implemented by channels that can list group members.
+type GroupMemberProvider interface {
+	ListGroupMembers(ctx context.Context, chatID string) ([]GroupMember, error)
 }
 
 // PendingCompactable is optionally implemented by channels that have a PendingHistory

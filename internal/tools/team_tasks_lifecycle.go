@@ -25,7 +25,7 @@ func (t *TeamTasksTool) executeClaim(ctx context.Context, args map[string]any) *
 	}
 
 	ownerKey := t.manager.agentKeyFromID(ctx, agentID)
-	t.manager.broadcastTeamEvent(protocol.EventTeamTaskClaimed, protocol.TeamTaskEventPayload{
+	t.manager.broadcastTeamEvent(ctx, protocol.EventTeamTaskClaimed, protocol.TeamTaskEventPayload{
 		TeamID:           team.ID.String(),
 		TaskID:           taskID.String(),
 		Status:           store.TeamTaskStatusInProgress,
@@ -43,10 +43,9 @@ func (t *TeamTasksTool) executeClaim(ctx context.Context, args map[string]any) *
 }
 
 func (t *TeamTasksTool) executeComplete(ctx context.Context, args map[string]any) *Result {
-	// Delegate agents cannot complete tasks — autoCompleteTeamTask handles it.
-	if ToolChannelFromCtx(ctx) == ChannelDelegate {
-		return ErrorResult("delegate agents cannot complete team tasks directly — results are auto-completed when delegation finishes")
-	}
+	// Note: reviewer role exists but is not yet active in UI.
+	// All approval flows through leader. When reviewer role is enabled,
+	// restrict teammate agents from completing tasks directly.
 
 	team, agentID, err := t.manager.resolveTeam(ctx)
 	if err != nil {
@@ -81,7 +80,7 @@ func (t *TeamTasksTool) executeComplete(ctx context.Context, args map[string]any
 		taskNumber = completedTask.TaskNumber
 		taskSubject = completedTask.Subject
 	}
-	t.manager.broadcastTeamEvent(protocol.EventTeamTaskCompleted, protocol.TeamTaskEventPayload{
+	t.manager.broadcastTeamEvent(ctx, protocol.EventTeamTaskCompleted, protocol.TeamTaskEventPayload{
 		TeamID:           team.ID.String(),
 		TaskID:           taskID.String(),
 		TaskNumber:       taskNumber,
@@ -105,10 +104,7 @@ func (t *TeamTasksTool) executeComplete(ctx context.Context, args map[string]any
 }
 
 func (t *TeamTasksTool) executeCancel(ctx context.Context, args map[string]any) *Result {
-	// Delegate agents cannot cancel tasks — only lead/user-facing agents can.
-	if ToolChannelFromCtx(ctx) == ChannelDelegate {
-		return ErrorResult("delegate agents cannot cancel team tasks directly")
-	}
+	// Note: reviewer role not yet active. Cancellation goes through leader only.
 
 	team, agentID, err := t.manager.resolveTeam(ctx)
 	if err != nil {
@@ -133,7 +129,7 @@ func (t *TeamTasksTool) executeCancel(ctx context.Context, args map[string]any) 
 		return ErrorResult("failed to cancel task: " + err.Error())
 	}
 
-	t.manager.broadcastTeamEvent(protocol.EventTeamTaskCancelled, protocol.TeamTaskEventPayload{
+	t.manager.broadcastTeamEvent(ctx, protocol.EventTeamTaskCancelled, protocol.TeamTaskEventPayload{
 		TeamID:    team.ID.String(),
 		TaskID:    taskID.String(),
 		Status:    store.TeamTaskStatusCancelled,
@@ -179,7 +175,7 @@ func (t *TeamTasksTool) executeReview(ctx context.Context, args map[string]any) 
 	}
 
 	ownerKey := t.manager.agentKeyFromID(ctx, agentID)
-	t.manager.broadcastTeamEvent(protocol.EventTeamTaskReviewed, protocol.TeamTaskEventPayload{
+	t.manager.broadcastTeamEvent(ctx, protocol.EventTeamTaskReviewed, protocol.TeamTaskEventPayload{
 		TeamID:           team.ID.String(),
 		TaskID:           taskID.String(),
 		Status:           store.TeamTaskStatusInReview,
@@ -197,10 +193,7 @@ func (t *TeamTasksTool) executeReview(ctx context.Context, args map[string]any) 
 }
 
 func (t *TeamTasksTool) executeApprove(ctx context.Context, args map[string]any) *Result {
-	// Delegate agents cannot approve tasks — approval requires user authority.
-	if ToolChannelFromCtx(ctx) == ChannelDelegate {
-		return ErrorResult("delegate agents cannot approve team tasks")
-	}
+	// Note: reviewer role not yet active. All approvals flow through leader or dashboard.
 
 	team, agentID, err := t.manager.resolveTeam(ctx)
 	if err != nil {
@@ -242,7 +235,7 @@ func (t *TeamTasksTool) executeApprove(ctx context.Context, args map[string]any)
 		newStatus = approved.Status
 	}
 
-	t.manager.broadcastTeamEvent(protocol.EventTeamTaskApproved, protocol.TeamTaskEventPayload{
+	t.manager.broadcastTeamEvent(ctx, protocol.EventTeamTaskApproved, protocol.TeamTaskEventPayload{
 		TeamID:    team.ID.String(),
 		TaskID:    taskID.String(),
 		Subject:   task.Subject,
@@ -255,25 +248,19 @@ func (t *TeamTasksTool) executeApprove(ctx context.Context, args map[string]any)
 		ActorID:   t.manager.agentKeyFromID(ctx, agentID),
 	})
 
-	// Inject message to lead agent via mailbox
-	msg := fmt.Sprintf("Task '%s' (id=%s) has been approved by the user (status: %s).", task.Subject, task.ID, newStatus)
-	_ = t.manager.teamStore.SendMessage(ctx, &store.TeamMessageData{
-		TeamID:      team.ID,
-		FromAgentID: team.LeadAgentID,
-		ToAgentID:   &team.LeadAgentID,
-		Content:     msg,
-		MessageType: store.TeamMessageTypeChat,
-		TaskID:      &taskID,
+	// Record approval as a task comment for audit trail.
+	approveMsg := fmt.Sprintf("Task approved (status: %s).", newStatus)
+	_ = t.manager.teamStore.AddTaskComment(ctx, &store.TeamTaskCommentData{
+		TaskID:  taskID,
+		AgentID: &agentID,
+		Content: approveMsg,
 	})
 
 	return NewResult(fmt.Sprintf("Task %s approved (status: %s).", taskID, newStatus))
 }
 
 func (t *TeamTasksTool) executeReject(ctx context.Context, args map[string]any) *Result {
-	// Delegate agents cannot reject tasks.
-	if ToolChannelFromCtx(ctx) == ChannelDelegate {
-		return ErrorResult("delegate agents cannot reject team tasks")
-	}
+	// Note: reviewer role not yet active. Rejections flow through leader or dashboard.
 
 	team, agentID, err := t.manager.resolveTeam(ctx)
 	if err != nil {
@@ -312,7 +299,7 @@ func (t *TeamTasksTool) executeReject(ctx context.Context, args map[string]any) 
 		return ErrorResult("failed to reject task: " + err.Error())
 	}
 
-	t.manager.broadcastTeamEvent(protocol.EventTeamTaskRejected, protocol.TeamTaskEventPayload{
+	t.manager.broadcastTeamEvent(ctx, protocol.EventTeamTaskRejected, protocol.TeamTaskEventPayload{
 		TeamID:    team.ID.String(),
 		TaskID:    taskID.String(),
 		Subject:   task.Subject,
@@ -326,15 +313,12 @@ func (t *TeamTasksTool) executeReject(ctx context.Context, args map[string]any) 
 		ActorID:   t.manager.agentKeyFromID(ctx, agentID),
 	})
 
-	// Inject message to lead agent via mailbox
-	leadMsg := fmt.Sprintf("Task '%s' (id=%s) was rejected by the user. Reason: %s", task.Subject, task.ID, reason)
-	_ = t.manager.teamStore.SendMessage(ctx, &store.TeamMessageData{
-		TeamID:      team.ID,
-		FromAgentID: team.LeadAgentID,
-		ToAgentID:   &team.LeadAgentID,
-		Content:     leadMsg,
-		MessageType: store.TeamMessageTypeChat,
-		TaskID:      &taskID,
+	// Record rejection as a task comment for audit trail.
+	rejectMsg := fmt.Sprintf("Task rejected. Reason: %s", reason)
+	_ = t.manager.teamStore.AddTaskComment(ctx, &store.TeamTaskCommentData{
+		TaskID:  taskID,
+		AgentID: &agentID,
+		Content: rejectMsg,
 	})
 
 	return NewResult(fmt.Sprintf("Task %s rejected. Dependent tasks have been unblocked.", taskID))

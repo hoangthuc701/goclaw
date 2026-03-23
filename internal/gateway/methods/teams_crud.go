@@ -10,6 +10,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/gateway"
 	"github.com/nextlevelbuilder/goclaw/internal/i18n"
+	"github.com/nextlevelbuilder/goclaw/internal/permissions"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
@@ -48,6 +49,15 @@ func (m *TeamsMethods) handleGet(ctx context.Context, client *gateway.Client, re
 	if err != nil {
 		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInternal, err.Error()))
 		return
+	}
+
+	// Non-admin callers must be a member of the team to view it.
+	if !permissions.HasMinRole(client.Role(), permissions.RoleAdmin) {
+		callerID := store.UserIDFromContext(ctx)
+		if ok, err := m.teamStore.HasTeamAccess(ctx, teamID, callerID); err != nil || !ok {
+			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrNotFound, i18n.T(locale, i18n.MsgNotFound, "team", params.TeamID)))
+			return
+		}
 	}
 
 	members, err := m.teamStore.ListMembers(ctx, teamID)
@@ -90,6 +100,15 @@ func (m *TeamsMethods) handleDelete(ctx context.Context, client *gateway.Client,
 	if err != nil {
 		client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrInvalidRequest, i18n.T(locale, i18n.MsgInvalidID, "teamId")))
 		return
+	}
+
+	// Non-admin callers must have team access to delete.
+	if !permissions.HasMinRole(client.Role(), permissions.RoleAdmin) {
+		callerID := store.UserIDFromContext(ctx)
+		if ok, err := m.teamStore.HasTeamAccess(ctx, teamID, callerID); err != nil || !ok {
+			client.SendResponse(protocol.NewErrorResponse(req.ID, protocol.ErrNotFound, i18n.T(locale, i18n.MsgNotFound, "team", params.TeamID)))
+			return
+		}
 	}
 
 	// Fetch team and members before deleting for event + cache invalidation
@@ -229,6 +248,19 @@ func (m *TeamsMethods) handleUpdate(ctx context.Context, client *gateway.Client,
 		EscalationActions     []string `json:"escalation_actions,omitempty"`
 		WorkspaceScope        string   `json:"workspace_scope,omitempty"`
 		WorkspaceQuotaMB      *int     `json:"workspace_quota_mb,omitempty"`
+		Notifications         *struct {
+			Dispatched *bool  `json:"dispatched,omitempty"`
+			Progress   *bool  `json:"progress,omitempty"`
+			Failed     *bool  `json:"failed,omitempty"`
+			Completed  *bool  `json:"completed,omitempty"`
+			Commented  *bool  `json:"commented,omitempty"`
+			NewTask    *bool  `json:"new_task,omitempty"`
+			Mode       string `json:"mode,omitempty"`
+		} `json:"notifications,omitempty"`
+		MemberRequests *struct {
+			Enabled      *bool `json:"enabled,omitempty"`
+			AutoDispatch *bool `json:"auto_dispatch,omitempty"`
+		} `json:"member_requests,omitempty"`
 	}
 	raw, _ := json.Marshal(params.Settings)
 	var access teamAccessSettings

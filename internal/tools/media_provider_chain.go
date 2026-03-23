@@ -84,7 +84,7 @@ func ResolveMediaProviderChain(
 	}
 
 	// 3. Hardcoded default chain — use first available provider
-	return buildDefaultChain(defaultPriority, defaultModels, registry)
+	return buildDefaultChain(ctx, defaultPriority, defaultModels, registry)
 }
 
 // parseChainSettings parses the settings JSON into a chain, handling both new
@@ -116,13 +116,14 @@ func parseChainSettings(raw []byte, defaultModels map[string]string) []MediaProv
 // buildDefaultChain creates a chain from the hardcoded priority list,
 // including only providers that are currently registered.
 func buildDefaultChain(
+	ctx context.Context,
 	priority []string,
 	defaultModels map[string]string,
 	registry *providers.Registry,
 ) []MediaProviderEntry {
 	var chain []MediaProviderEntry
 	for _, name := range priority {
-		if _, err := registry.Get(name); err == nil {
+		if _, err := registry.Get(ctx, name); err == nil {
 			entry := MediaProviderEntry{
 				Provider: name,
 				Model:    defaultModels[name],
@@ -162,7 +163,7 @@ func ExecuteWithChain(
 
 	var lastErr error
 	for _, entry := range chain {
-		p, err := registry.Get(entry.Provider)
+		p, err := registry.Get(ctx, entry.Provider)
 		if err != nil {
 			slog.Warn("media_chain: provider not found, skipping",
 				"provider", entry.Provider, "error", err)
@@ -298,7 +299,6 @@ type typedProvider interface {
 // used by callProvider switch statements.
 var dbTypeToMediaType = map[string]string{
 	"gemini_native":    "gemini",
-	"openai_compat":    "openai_compat",
 	"openrouter":       "openrouter",
 	"minimax_native":   "minimax",
 	"dashscope":        "dashscope",
@@ -310,16 +310,20 @@ var dbTypeToMediaType = map[string]string{
 // ResolveProviderType returns the media routing type for a provider.
 // It first checks the provider's DB type (via typedProvider interface),
 // then falls back to name-based heuristics for config-registered providers.
+// Generic DB types like "openai_compat" are skipped in favor of name-based
+// inference, since different openai_compat providers (OpenRouter, etc.)
+// need different media API endpoints.
 func ResolveProviderType(p providers.Provider) string {
-	// Prefer the actual DB provider_type when available
+	// Prefer the actual DB provider_type when available,
+	// but skip generic types that don't distinguish media routing.
 	if tp, ok := p.(typedProvider); ok {
-		if pt := tp.ProviderType(); pt != "" {
+		if pt := tp.ProviderType(); pt != "" && pt != "openai_compat" {
 			if mt, found := dbTypeToMediaType[pt]; found {
 				return mt
 			}
 		}
 	}
-	// Fallback: infer from provider name (for config-registered providers)
+	// Fallback: infer from provider name (for config-registered and openai_compat providers)
 	return providerTypeFromName(p.Name())
 }
 

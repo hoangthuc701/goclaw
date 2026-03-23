@@ -6,7 +6,10 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
+	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
 )
 
@@ -28,6 +31,9 @@ func (m *Manager) HandleAgentEvent(eventType, runID string, payload any) {
 	}
 
 	ctx := context.Background()
+	if ta, ok := ch.(interface{ TenantID() uuid.UUID }); ok {
+		ctx = store.WithTenantID(ctx, ta.TenantID())
+	}
 
 	// Forward to StreamingChannel
 	if sc, ok := ch.(StreamingChannel); ok {
@@ -70,8 +76,6 @@ func (m *Manager) HandleAgentEvent(eventType, runID string, payload any) {
 			// Stop the current stream (reasoning or answer) and finalize only
 			// the answer stream (reasoning messages stay visible).
 			rc.mu.Lock()
-			// Capture current state before resetting for next iteration.
-			wasReasoningStream := rc.hasThinking && !rc.thinkingDone
 			currentStream := rc.stream
 			rc.stream = nil
 			rc.inToolPhase = true
@@ -84,17 +88,18 @@ func (m *Manager) HandleAgentEvent(eventType, runID string, payload any) {
 				if err := currentStream.Stop(ctx); err != nil {
 					slog.Debug("stream tool-phase stop failed", "channel", rc.ChannelName, "error", err)
 				}
-				// Only finalize answer streams (hand off messageID to Send()).
-				// Reasoning streams stay as visible messages — don't put their
-				// messageID into placeholders or it would confuse Send().
-				if !wasReasoningStream {
-					sc.FinalizeStream(ctx, rc.ChatID, currentStream)
-				}
+				// Don't finalize mid-run streams — their messageID must NOT go
+				// into placeholders. Otherwise tool_status placeholder_update
+				// overwrites streamed content, and subsequent FinalizeStream
+				// calls overwrite the placeholder key, leaving earlier messages
+				// stuck at tool status text. Only run.completed finalizes.
 			}
 
-			// Show tool status in streaming preview (edit placeholder with tool name).
+			// Show tool status by editing placeholder message (non-streaming only).
+			// Streaming channels show tool status via reaction emoji instead —
+			// editing the placeholder would overwrite streamed content.
 			toolName := extractPayloadString(payload, "name")
-			if toolName != "" && rc.ToolStatusEnabled {
+			if toolName != "" && rc.ToolStatusEnabled && !rc.Streaming {
 				statusText := formatToolStatus(toolName)
 				outMeta := copyRoutingMeta(rc.Metadata)
 				outMeta["placeholder_update"] = "true"
@@ -376,7 +381,6 @@ var toolStatusMap = map[string]string{
 	// Delegation & teams
 	"spawn":        "👥 Delegating task...",
 	"team_tasks":   "📋 Managing team tasks...",
-	"team_message": "💬 Sending team message...",
 	// Sessions
 	"sessions_list":    "📋 Listing sessions...",
 	"session_status":   "📋 Checking session...",

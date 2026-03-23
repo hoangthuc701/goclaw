@@ -2,6 +2,9 @@ import { useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useHttp } from "@/hooks/use-ws";
 import { queryKeys } from "@/lib/query-keys";
+import { toast } from "@/stores/use-toast-store";
+import i18next from "i18next";
+import { userFriendlyError } from "@/lib/error-utils";
 
 export interface BuiltinToolData {
   name: string;
@@ -9,6 +12,7 @@ export interface BuiltinToolData {
   description: string;
   category: string;
   enabled: boolean;
+  tenant_enabled: boolean | null;
   settings: Record<string, unknown>;
   requires: string[];
   metadata: Record<string, unknown>;
@@ -36,11 +40,45 @@ export function useBuiltinTools() {
 
   const updateTool = useCallback(
     async (name: string, data: { enabled?: boolean; settings?: Record<string, unknown> }) => {
-      await http.put(`/v1/tools/builtin/${name}`, data);
-      await invalidate();
+      try {
+        await http.put(`/v1/tools/builtin/${name}`, data);
+        await invalidate();
+        toast.success(i18next.t("tools:builtin.settingsDialog.toast.saved"));
+      } catch (err) {
+        toast.error(i18next.t("tools:builtin.settingsDialog.toast.failed"), userFriendlyError(err));
+        throw err;
+      }
     },
     [http, invalidate],
   );
 
-  return { tools, loading, refresh: invalidate, updateTool };
+  const setTenantConfig = useCallback(
+    async (name: string, enabled: boolean) => {
+      try {
+        await http.put(`/v1/tools/builtin/${name}/tenant-config`, { enabled });
+        await invalidate();
+        toast.success(i18next.t("tools:builtin.settingsDialog.toast.saved"));
+      } catch (err) {
+        toast.error(i18next.t("tools:builtin.settingsDialog.toast.failed"), userFriendlyError(err));
+        throw err;
+      }
+    },
+    [http, invalidate],
+  );
+
+  const deleteTenantConfig = useCallback(
+    async (name: string) => {
+      try {
+        await http.delete(`/v1/tools/builtin/${name}/tenant-config`);
+        await invalidate();
+        toast.success(i18next.t("tools:builtin.settingsDialog.toast.saved"));
+      } catch (err) {
+        toast.error(i18next.t("tools:builtin.settingsDialog.toast.failed"), userFriendlyError(err));
+        throw err;
+      }
+    },
+    [http, invalidate],
+  );
+
+  return { tools, loading, refresh: invalidate, updateTool, setTenantConfig, deleteTenantConfig };
 }

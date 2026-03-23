@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
@@ -23,11 +24,12 @@ import (
 const maxHistoryKeys = 1000
 
 // DefaultGroupHistoryLimit is the default pending message limit per group.
-const DefaultGroupHistoryLimit = 50
+const DefaultGroupHistoryLimit = 100
 
 const (
-	flushInterval = 3 * time.Second // periodic flush interval
-	flushBatchMax = 20              // flush when buffer reaches this size
+	flushInterval        = 3 * time.Second  // periodic flush interval
+	flushBatchMax        = 20               // flush when buffer reaches this size
+	compactSweepInterval = 10 * time.Minute // periodic compaction sweep for post-restart safety
 )
 
 // HistoryEntry represents a single tracked group message.
@@ -56,6 +58,9 @@ type PendingHistory struct {
 	stopCh      chan struct{}
 	stopped     chan struct{}
 
+	// Tenant isolation for DB operations.
+	tenantID uuid.UUID
+
 	// Compaction (optional — nil means no auto-compaction)
 	compactionCfg *CompactionConfig
 
@@ -70,11 +75,12 @@ func NewPendingHistory() *PendingHistory {
 
 // NewPersistentHistory creates a persistent history tracker with batched DB flush.
 // Call StartFlusher() after creation and StopFlusher() on shutdown.
-func NewPersistentHistory(channelName string, s store.PendingMessageStore) *PendingHistory {
+func NewPersistentHistory(channelName string, s store.PendingMessageStore, tenantID uuid.UUID) *PendingHistory {
 	return &PendingHistory{
 		entries:     make(map[string][]HistoryEntry),
 		channelName: channelName,
 		store:       s,
+		tenantID:    tenantID,
 		flushSignal: make(chan struct{}, 1),
 		stopCh:      make(chan struct{}),
 		stopped:     make(chan struct{}),
@@ -103,11 +109,20 @@ func (ph *PendingHistory) LoadFromDB(ctx context.Context) {
 }
 
 // MakeHistory creates a PendingHistory — persistent if store is non-nil, RAM-only otherwise.
-func MakeHistory(channelName string, s store.PendingMessageStore) *PendingHistory {
+func MakeHistory(channelName string, s store.PendingMessageStore, tenantID uuid.UUID) *PendingHistory {
 	if s != nil {
-		return NewPersistentHistory(channelName, s)
+		return NewPersistentHistory(channelName, s, tenantID)
 	}
 	return NewPendingHistory()
+}
+
+// tenantCtx returns a context with the tenant ID set for DB operations.
+func (ph *PendingHistory) tenantCtx() context.Context {
+	ctx := context.Background()
+	if ph.tenantID != uuid.Nil {
+		ctx = store.WithTenantID(ctx, ph.tenantID)
+	}
+	return ctx
 }
 
 // Record adds a message to the pending history for a group.
@@ -155,7 +170,7 @@ func (ph *PendingHistory) Record(historyKey string, entry HistoryEntry, limit in
 // populates RAM cache, and returns converted entries.
 // Called when RAM has no entries but DB store is available.
 func (ph *PendingHistory) loadFromDB(historyKey string) []HistoryEntry {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(ph.tenantCtx(), 10*time.Second)
 	defer cancel()
 
 	msgs, err := ph.store.ListByKey(ctx, ph.channelName, historyKey)
@@ -270,7 +285,7 @@ func (ph *PendingHistory) Clear(historyKey string) {
 		// Remove pending flushes for this key
 		ph.removeFromFlushBuf(historyKey)
 		// Delete from DB
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(ph.tenantCtx(), 10*time.Second)
 		defer cancel()
 		if err := ph.store.DeleteByKey(ctx, ph.channelName, historyKey); err != nil {
 			slog.Warn("pending_history.clear_db_failed", "channel", ph.channelName, "key", historyKey, "error", err)

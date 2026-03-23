@@ -9,6 +9,7 @@ import (
 
 	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/providers"
+	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
 // Default memory flush prompts matching TS memory-flush.ts.
@@ -66,7 +67,7 @@ func ResolveMemoryFlushSettings(compaction *config.CompactionConfig) *MemoryFlus
 // shouldRunMemoryFlush checks whether a memory flush should run before compaction.
 // Flush always runs when compaction triggers (called inside maybeSummarize),
 // gated only by enabled/memory checks and a dedup guard per compaction cycle.
-func (l *Loop) shouldRunMemoryFlush(sessionKey string, totalTokens int, settings *MemoryFlushSettings) bool {
+func (l *Loop) shouldRunMemoryFlush(ctx context.Context, sessionKey string, totalTokens int, settings *MemoryFlushSettings) bool {
 	if settings == nil || !settings.Enabled || !l.hasMemory {
 		return false
 	}
@@ -76,8 +77,8 @@ func (l *Loop) shouldRunMemoryFlush(sessionKey string, totalTokens int, settings
 	}
 
 	// Deduplication: skip if already flushed in this compaction cycle.
-	compactionCount := l.sessions.GetCompactionCount(sessionKey)
-	lastFlushAt := l.sessions.GetMemoryFlushCompactionCount(sessionKey)
+	compactionCount := l.sessions.GetCompactionCount(ctx, sessionKey)
+	lastFlushAt := l.sessions.GetMemoryFlushCompactionCount(ctx, sessionKey)
 	if lastFlushAt >= 0 && lastFlushAt == compactionCount {
 		return false
 	}
@@ -94,8 +95,8 @@ func (l *Loop) runMemoryFlush(ctx context.Context, sessionKey string, settings *
 	defer cancel()
 
 	// Build messages: system prompt + history summary + flush prompt
-	history := l.sessions.GetHistory(sessionKey)
-	summary := l.sessions.GetSummary(sessionKey)
+	history := l.sessions.GetHistory(ctx, sessionKey)
+	summary := l.sessions.GetSummary(ctx, sessionKey)
 
 	var messages []providers.Message
 
@@ -163,6 +164,7 @@ func (l *Loop) runMemoryFlush(ctx context.Context, sessionKey string, settings *
 		})
 		if err != nil {
 			slog.Warn("memory flush: LLM call failed", "error", err)
+			l.extractiveMemoryFallback(flushCtx, sessionKey, history, "LLM error")
 			break
 		}
 
@@ -170,7 +172,8 @@ func (l *Loop) runMemoryFlush(ctx context.Context, sessionKey string, settings *
 		if len(resp.ToolCalls) == 0 {
 			content := SanitizeAssistantContent(resp.Content)
 			if IsSilentReply(content) {
-				slog.Info("memory flush: NO_REPLY (nothing to save)")
+				slog.Info("memory flush: NO_REPLY, trying extractive fallback")
+				l.extractiveMemoryFallback(flushCtx, sessionKey, history, "NO_REPLY")
 			} else if content != "" {
 				slog.Info("memory flush: completed with response", "content_len", len(content))
 			}
@@ -200,8 +203,49 @@ func (l *Loop) runMemoryFlush(ctx context.Context, sessionKey string, settings *
 	}
 
 	// Mark flush as done
-	l.sessions.SetMemoryFlushDone(sessionKey)
-	l.sessions.Save(sessionKey)
+	l.sessions.SetMemoryFlushDone(ctx, sessionKey)
+	l.sessions.Save(ctx, sessionKey)
 
 	slog.Info("memory flush: completed", "session", sessionKey)
+}
+
+// extractiveMemoryFallback runs the regex-based extraction on conversation history
+// and writes the result directly to the memory store when the LLM flush produced no output.
+func (l *Loop) extractiveMemoryFallback(ctx context.Context, sessionKey string, history []providers.Message, reason string) {
+	if l.memStore == nil {
+		return
+	}
+
+	// Limit input to last 20 messages to avoid regex over unbounded text
+	if len(history) > 20 {
+		history = history[len(history)-20:]
+	}
+
+	extracted := ExtractiveMemoryFallback(history)
+	if extracted == "" {
+		slog.Info("memory flush: extractive fallback produced no content", "session", sessionKey, "reason", reason)
+		return
+	}
+
+	agentID := l.agentUUID.String()
+	userID := store.MemoryUserID(ctx)
+	docPath := fmt.Sprintf("memory/%s-auto-extract.md", time.Now().Format("2006-01-02"))
+
+	// Append to existing document if it exists
+	existing, err := l.memStore.GetDocument(ctx, agentID, userID, docPath)
+	if err == nil && existing != "" {
+		extracted = existing + "\n\n---\n\n" + extracted
+	}
+
+	if err := l.memStore.PutDocument(ctx, agentID, userID, docPath, extracted); err != nil {
+		slog.Warn("memory flush: extractive fallback write failed", "session", sessionKey, "error", err)
+		return
+	}
+
+	if err := l.memStore.IndexDocument(ctx, agentID, userID, docPath); err != nil {
+		slog.Warn("memory flush: extractive fallback index failed", "session", sessionKey, "error", err)
+		// Non-fatal: document was saved
+	}
+
+	slog.Info("memory flush: extractive fallback saved", "session", sessionKey, "reason", reason, "path", docPath, "content_len", len(extracted))
 }

@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/google/uuid"
 	"github.com/lib/pq"
@@ -22,6 +24,7 @@ const taskSelectCols = `t.id, t.team_id, t.subject, t.description, t.status, t.o
 		 t.task_type, t.task_number, COALESCE(t.identifier,''), t.created_by_agent_id, COALESCE(t.assignee_user_id,''), t.parent_id,
 		 COALESCE(t.chat_id,''), t.metadata, t.locked_at, t.lock_expires_at, COALESCE(t.progress_percent,0), COALESCE(t.progress_step,''),
 		 t.followup_at, COALESCE(t.followup_count,0), COALESCE(t.followup_max,0), COALESCE(t.followup_message,''), COALESCE(t.followup_channel,''), COALESCE(t.followup_chat_id,''),
+		 COALESCE(t.comment_count,0), COALESCE(t.attachment_count,0),
 		 t.created_at, t.updated_at,
 		 COALESCE(a.agent_key, '') AS owner_agent_key,
 		 COALESCE(ca.agent_key, '') AS created_by_agent_key`
@@ -39,10 +42,20 @@ const maxListTasksRows = 30
 // ============================================================
 
 func (s *PGTeamStore) ListTaskScopes(ctx context.Context, teamID uuid.UUID) ([]store.ScopeEntry, error) {
+	args := []any{teamID}
+	tenantWhere := ""
+	if !store.IsCrossTenant(ctx) {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return nil, fmt.Errorf("tenant_id required")
+		}
+		tenantWhere = fmt.Sprintf(" AND tenant_id = $%d", len(args)+1)
+		args = append(args, tid)
+	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT DISTINCT channel, chat_id FROM team_tasks
-		 WHERE team_id = $1 AND channel IS NOT NULL AND channel != ''
-		 ORDER BY channel, chat_id`, teamID)
+		 WHERE team_id = $1 AND channel IS NOT NULL AND channel != ''`+tenantWhere+`
+		 ORDER BY channel, chat_id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -50,11 +63,11 @@ func (s *PGTeamStore) ListTaskScopes(ctx context.Context, teamID uuid.UUID) ([]s
 
 	var scopes []store.ScopeEntry
 	for rows.Next() {
-		var s store.ScopeEntry
-		if err := rows.Scan(&s.Channel, &s.ChatID); err != nil {
+		var sc store.ScopeEntry
+		if err := rows.Scan(&sc.Channel, &sc.ChatID); err != nil {
 			return nil, err
 		}
-		scopes = append(scopes, s)
+		scopes = append(scopes, sc)
 	}
 	return scopes, rows.Err()
 }
@@ -89,10 +102,11 @@ func (s *PGTeamStore) CreateTask(ctx context.Context, task *store.TeamTaskData) 
 		return fmt.Errorf("lock team: %w", err)
 	}
 
+	// Scope task_number per (team_id, chat_id) so each conversation starts from 1.
 	var taskNumber int
 	err = tx.QueryRowContext(ctx,
-		`SELECT COALESCE(MAX(task_number), 0) + 1 FROM team_tasks WHERE team_id = $1`,
-		task.TeamID,
+		`SELECT COALESCE(MAX(task_number), 0) + 1 FROM team_tasks WHERE team_id = $1 AND COALESCE(chat_id, '') = $2`,
+		task.TeamID, task.ChatID,
 	).Scan(&taskNumber)
 	if err != nil {
 		return fmt.Errorf("compute task_number: %w", err)
@@ -113,8 +127,8 @@ func (s *PGTeamStore) CreateTask(ctx context.Context, task *store.TeamTaskData) 
 	// INSERT with all fields in one statement.
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO team_tasks (id, team_id, subject, description, status, owner_agent_id, blocked_by, priority, result, user_id, channel,
-		 task_type, task_number, identifier, created_by_agent_id, parent_id, chat_id, metadata, locked_at, lock_expires_at, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)`,
+		 task_type, task_number, identifier, created_by_agent_id, parent_id, chat_id, metadata, locked_at, lock_expires_at, created_at, updated_at, tenant_id)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)`,
 		task.ID, task.TeamID, task.Subject, task.Description,
 		task.Status, task.OwnerAgentID, pq.Array(task.BlockedBy),
 		task.Priority, task.Result,
@@ -125,13 +139,20 @@ func (s *PGTeamStore) CreateTask(ctx context.Context, task *store.TeamTaskData) 
 		sql.NullString{String: task.ChatID, Valid: task.ChatID != ""},
 		metaJSON,
 		task.LockedAt, task.LockExpiresAt,
-		now, now,
+		now, now, tenantIDForInsert(ctx),
 	)
 	if err != nil {
 		return err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	// Fire-and-forget: generate embedding for the new task's subject.
+	go s.generateTaskEmbedding(context.Background(), task.ID, task.Subject)
+
+	return nil
 }
 
 // allowedTaskUpdateCols is the whitelist of columns that UpdateTask accepts.
@@ -160,7 +181,26 @@ func (s *PGTeamStore) UpdateTask(ctx context.Context, taskID uuid.UUID, updates 
 		updates["blocked_by"] = pq.Array(v)
 	}
 	updates["updated_at"] = time.Now()
-	return execMapUpdate(ctx, s.db, "team_tasks", taskID, updates)
+	var updateErr error
+	if store.IsCrossTenant(ctx) {
+		updateErr = execMapUpdate(ctx, s.db, "team_tasks", taskID, updates)
+	} else {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return fmt.Errorf("tenant_id required for update")
+		}
+		updateErr = execMapUpdateWhereTenant(ctx, s.db, "team_tasks", updates, taskID, tid)
+	}
+	if updateErr != nil {
+		return updateErr
+	}
+
+	// Re-embed when subject changes.
+	if newSubject, ok := updates["subject"].(string); ok && newSubject != "" {
+		go s.generateTaskEmbedding(context.Background(), taskID, newSubject)
+	}
+
+	return nil
 }
 
 func (s *PGTeamStore) ListTasks(ctx context.Context, teamID uuid.UUID, orderBy string, statusFilter string, userID string, channel string, chatID string, limit int, offset int) ([]store.TeamTaskData, error) {
@@ -187,12 +227,26 @@ func (s *PGTeamStore) ListTasks(ctx context.Context, teamID uuid.UUID, orderBy s
 	// Scope filter: always bind $4/$5 but only enforce when non-empty.
 	scopeWhere := "AND ($4 = '' OR COALESCE(t.channel,'') = $4) AND ($5 = '' OR COALESCE(t.chat_id,'') = $5)"
 
+	// Base args: $1=teamID, $2=userID, $3=limit+1, $4=channel, $5=chatID, $6=offset
+	// Tenant clause appended as $7 when needed (after offset which stays at $6).
+	args := []any{teamID, userID, limit + 1, channel, chatID, offset}
+
+	tenantWhere := ""
+	if !store.IsCrossTenant(ctx) {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return nil, fmt.Errorf("tenant_id required")
+		}
+		tenantWhere = fmt.Sprintf(" AND t.tenant_id = $%d", len(args)+1)
+		args = append(args, tid)
+	}
+
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+taskSelectCols+`
 		 `+taskJoinClause+`
-		 WHERE t.team_id = $1 AND ($2 = '' OR t.user_id = $2) `+statusWhere+` `+scopeWhere+`
+		 WHERE t.team_id = $1 AND ($2 = '' OR t.user_id = $2) `+statusWhere+` `+scopeWhere+tenantWhere+`
 		 ORDER BY `+orderClause+`
-		 LIMIT $3 OFFSET $6`, teamID, userID, limit+1, channel, chatID, offset)
+		 LIMIT $3 OFFSET $6`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -201,10 +255,20 @@ func (s *PGTeamStore) ListTasks(ctx context.Context, teamID uuid.UUID, orderBy s
 }
 
 func (s *PGTeamStore) GetTask(ctx context.Context, taskID uuid.UUID) (*store.TeamTaskData, error) {
+	args := []any{taskID}
+	tenantWhere := ""
+	if !store.IsCrossTenant(ctx) {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return nil, fmt.Errorf("tenant_id required")
+		}
+		tenantWhere = fmt.Sprintf(" AND t.tenant_id = $%d", len(args)+1)
+		args = append(args, tid)
+	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+taskSelectCols+`
 		 `+taskJoinClause+`
-		 WHERE t.id = $1`, taskID)
+		 WHERE t.id = $1`+tenantWhere, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -223,10 +287,20 @@ func (s *PGTeamStore) GetTasksByIDs(ctx context.Context, ids []uuid.UUID) ([]sto
 	if len(ids) == 0 {
 		return nil, nil
 	}
+	args := []any{pq.Array(ids)}
+	tenantWhere := ""
+	if !store.IsCrossTenant(ctx) {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return nil, fmt.Errorf("tenant_id required")
+		}
+		tenantWhere = fmt.Sprintf(" AND t.tenant_id = $%d", len(args)+1)
+		args = append(args, tid)
+	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+taskSelectCols+`
 		 `+taskJoinClause+`
-		 WHERE t.id = ANY($1)`, pq.Array(ids))
+		 WHERE t.id = ANY($1)`+tenantWhere, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -238,23 +312,107 @@ func (s *PGTeamStore) SearchTasks(ctx context.Context, teamID uuid.UUID, query s
 	if limit <= 0 {
 		limit = 20
 	}
+	// Split query into words and join with AND for precise matching.
+	// Prefix each word for partial matching (e.g. "sketch" matches "sketchnote").
+	words := strings.Fields(query)
+	if len(words) == 0 {
+		return nil, nil
+	}
+	var sanitized []string
+	for _, w := range words {
+		w = strings.Map(func(r rune) rune {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == '_' {
+				return r
+			}
+			return -1
+		}, w)
+		w = strings.TrimSpace(w)
+		if w != "" {
+			sanitized = append(sanitized, w+":*")
+		}
+	}
+	if len(sanitized) == 0 {
+		return nil, nil
+	}
+	tsq := strings.Join(sanitized, " & ")
+
+	// FTS search.
+	ftsLimit := limit
+	if s.embProvider != nil {
+		ftsLimit = limit * 2 // fetch more for hybrid merge
+	}
+	// Base args: $1=teamID, $2=tsq, $3=ftsLimit, $4=userID
+	ftsArgs := []any{teamID, tsq, ftsLimit, userID}
+	ftsTenantWhere := ""
+	if !store.IsCrossTenant(ctx) {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return nil, fmt.Errorf("tenant_id required")
+		}
+		ftsTenantWhere = fmt.Sprintf(" AND t.tenant_id = $%d", len(ftsArgs)+1)
+		ftsArgs = append(ftsArgs, tid)
+	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+taskSelectCols+`
 		 `+taskJoinClause+`
-		 WHERE t.team_id = $1 AND t.tsv @@ plainto_tsquery('simple', $2) AND ($4 = '' OR t.user_id = $4)
-		 ORDER BY ts_rank(t.tsv, plainto_tsquery('simple', $2)) DESC
-		 LIMIT $3`, teamID, query, limit, userID)
+		 WHERE t.team_id = $1 AND t.tsv @@ to_tsquery('simple', $2) AND ($4 = '' OR t.user_id = $4)`+ftsTenantWhere+`
+		 ORDER BY ts_rank(t.tsv, to_tsquery('simple', $2)) DESC
+		 LIMIT $3`, ftsArgs...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanTaskRowsJoined(rows)
+	ftsResults, err := scanTaskRowsJoined(rows)
+	if err != nil {
+		return nil, err
+	}
+
+	// Helper: truncate FTS results to limit for FTS-only fallback.
+	truncatedFTS := func() ([]store.TeamTaskData, error) {
+		if len(ftsResults) > limit {
+			return ftsResults[:limit], nil
+		}
+		return ftsResults, nil
+	}
+
+	// If no embedding provider, return FTS-only results (graceful degradation).
+	if s.embProvider == nil {
+		return truncatedFTS()
+	}
+
+	// Hybrid search: combine FTS + vector similarity.
+	embeddings, err := s.embProvider.Embed(ctx, []string{query})
+	if err != nil {
+		slog.Warn("task search embedding failed, falling back to FTS", "error", err)
+		return truncatedFTS()
+	}
+	if len(embeddings) == 0 || len(embeddings[0]) == 0 {
+		return truncatedFTS()
+	}
+
+	vecResults, err := s.SearchTasksByEmbedding(ctx, teamID, embeddings[0], limit*2, userID)
+	if err != nil {
+		slog.Warn("task vector search failed, falling back to FTS", "error", err)
+		return truncatedFTS()
+	}
+
+	return hybridMergeTaskResults(ftsResults, vecResults, 0.3, 0.7, limit), nil
 }
 
 func (s *PGTeamStore) DeleteTask(ctx context.Context, taskID, teamID uuid.UUID) error {
+	args := []any{taskID, teamID}
+	tenantWhere := ""
+	if !store.IsCrossTenant(ctx) {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return fmt.Errorf("tenant_id required")
+		}
+		tenantWhere = fmt.Sprintf(" AND tenant_id = $%d", len(args)+1)
+		args = append(args, tid)
+	}
 	res, err := s.db.ExecContext(ctx,
-		`DELETE FROM team_tasks WHERE id = $1 AND team_id = $2 AND status IN ('completed','failed','cancelled')`,
-		taskID, teamID)
+		`DELETE FROM team_tasks WHERE id = $1 AND team_id = $2 AND status IN ('completed','failed','cancelled')`+tenantWhere,
+		args...)
 	if err != nil {
 		return err
 	}
@@ -269,11 +427,20 @@ func (s *PGTeamStore) DeleteTasks(ctx context.Context, taskIDs []uuid.UUID, team
 	if len(taskIDs) == 0 {
 		return nil, nil
 	}
+	args := []any{pq.Array(taskIDs), teamID}
+	tenantWhere := ""
+	if !store.IsCrossTenant(ctx) {
+		tid := store.TenantIDFromContext(ctx)
+		if tid == uuid.Nil {
+			return nil, fmt.Errorf("tenant_id required")
+		}
+		tenantWhere = fmt.Sprintf(" AND tenant_id = $%d", len(args)+1)
+		args = append(args, tid)
+	}
 	rows, err := s.db.QueryContext(ctx,
 		`DELETE FROM team_tasks
-		 WHERE id = ANY($1) AND team_id = $2 AND status IN ('completed','failed','cancelled')
-		 RETURNING id`,
-		taskIDs, teamID)
+		 WHERE id = ANY($1) AND team_id = $2 AND status IN ('completed','failed','cancelled')`+tenantWhere+`
+		 RETURNING id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +475,7 @@ func scanTaskRowsJoined(rows *sql.Rows) ([]store.TeamTaskData, error) {
 			&d.TaskType, &d.TaskNumber, &identifier, &createdByAgentID, &assigneeUserID, &parentID,
 			&chatID, &metadataJSON, &lockedAt, &lockExpiresAt, &d.ProgressPercent, &progressStep,
 			&followupAt, &followupCount, &followupMax, &followupMessage, &followupChannel, &followupChatID,
+			&d.CommentCount, &d.AttachmentCount,
 			&d.CreatedAt, &d.UpdatedAt,
 			&d.OwnerAgentKey,
 			&d.CreatedByAgentKey,

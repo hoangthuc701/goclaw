@@ -116,7 +116,8 @@
       "followupCount": "Đã nhắc: {{count}} lần",
       "followupCountMax": "Đã nhắc: {{count}}/{{max}} lần",
       "followupNext": "Nhắc tiếp:",
-      "followupDone": "Đã nhắc hết"
+      "followupDone": "Đã nhắc hết",
+      "download": "Tải xuống"
     },
     "delete": "Xoá",
     "deleteConfirm": "Xoá task này? Không thể hoàn tác.",
@@ -159,6 +160,27 @@
       "empty": "File trống hoặc là file nhị phân"
     }
   },
+  "auditLogs": {
+    "title": "Nhật ký hoạt động",
+    "empty": "Chưa có sự kiện",
+    "loadMore": "Tải thêm",
+    "event": {
+      "created": "Tạo mới",
+      "claimed": "Nhận",
+      "assigned": "Phân công",
+      "dispatched": "Gửi đi",
+      "completed": "Hoàn thành",
+      "failed": "Thất bại",
+      "cancelled": "Hủy",
+      "reviewed": "Đánh giá",
+      "approved": "Duyệt",
+      "rejected": "Từ chối",
+      "commented": "Bình luận",
+      "progress": "Tiến độ",
+      "updated": "Cập nhật",
+      "stale": "Quá hạn"
+    }
+  },
   "settings": {
     "title": "Cài đặt nhóm",
     "name": "Tên",
@@ -189,6 +211,8 @@
     "notifyProgressHint": "Thông báo khi thành viên cập nhật tiến trình.",
     "notifyFailed": "Thất bại",
     "notifyFailedHint": "Thông báo khi nhiệm vụ thất bại.",
+    "notifySlowTool": "Cảnh báo tool chạy lâu",
+    "notifySlowToolHint": "Thông báo hệ thống khi tool chạy lâu bất thường. Luôn gửi trực tiếp — không qua leader.",
     "notifyMode": "Chế độ gửi",
     "notifyModeHint": "Cách thông báo được gửi đến kênh chat.",
     "notifyModeDirect": "Trực tiếp",
@@ -196,11 +220,22 @@
     "notifyModeLeader": "Qua Leader",
     "notifyModeLeaderDesc": "Leader diễn đạt lại cập nhật một cách tự nhiên trước khi gửi.",
     "notifyModeLeaderWarning": "Chế độ Leader dùng AI để diễn đạt lại (tốn token, có thể chậm hơn).",
+    "notifyCompleted": "Thông báo khi task hoàn thành",
+    "notifyCommented": "Thông báo khi có bình luận",
+    "notifyNewTask": "Thông báo khi tạo task mới",
+    "memberRequests": "Yêu cầu thành viên",
+    "memberRequestsEnabled": "Cho phép thành viên tạo request",
+    "memberRequestsEnabledDesc": "Thành viên có thể tạo request để nhờ hỗ trợ từ thành viên khác",
+    "memberRequestsAutoDispatch": "Tự động phân phối cho người nhận",
+    "memberRequestsAutoDispatchDesc": "Request được phân phối ngay; nếu tắt thì chờ leader duyệt",
     "searchUsers": "Tìm kiếm người dùng...",
     "selectChannel": "Chọn channel...",
     "escalationPolicy": "Chính sách Leo thang",
     "escalationMode": "Chế độ Leo thang",
     "escalationModeHint": "Kiểm soát cách xử lý action workspace nhạy cảm (pin, tag, xóa file người khác, set_template) khi agent yêu cầu.",
+    "blockerEscalation": "Escalation khi bị chặn",
+    "blockerEscalationEnabled": "Bật escalation khi bị chặn",
+    "blockerEscalationHint": "Khi member báo blocker, task tự fail và leader được thông báo để retry với hướng dẫn mới.",
     "escalationModeAuto": "Tự động (mặc định)",
     "escalationModeAutoDesc": "LLM lead đánh giá yêu cầu — từ chối hoặc tạo task review. Không bao giờ thực thi trực tiếp.",
     "escalationModeReview": "Review",
@@ -230,7 +265,7 @@
     "versionAdvancedDesc": "Tất cả tính năng V1 cùng khóa thực thi, nhắc nhở theo dõi, quy trình duyệt, theo dõi tiến độ, bình luận, nhật ký hoạt động và tự phục hồi.",
     "whatsNew": "Có gì mới?",
     "versionModal": {
-      "title": "Phiên bản Team",
+      "title": "Tính năng Super Team",
       "feature": "Tính năng",
       "taskManagement": "Quản lý nhiệm vụ",
       "taskManagementDesc": "Tạo, phân công, hoàn thành, hủy nhiệm vụ",
@@ -248,11 +283,11 @@
       "commentsAuditDesc": "Bình luận nhiệm vụ và lịch sử sự kiện đầy đủ",
       "autoRecovery": "Tự phục hồi",
       "autoRecoveryDesc": "Nhiệm vụ bị treo tự đặt lại sau thời gian chờ",
-      "escalationPolicy": "Chính sách leo thang",
-      "escalationPolicyDesc": "Kiểm soát những gì agent có thể tự thực hiện",
+      "escalationPolicy": "Escalation khi bị chặn",
+      "escalationPolicyDesc": "Member có thể báo blocker — tự fail task và thông báo leader để retry",
       "comingSoon": "Sắp ra mắt",
       "downgradeNote": "Hạ cấp an toàn — dữ liệu V2 được giữ lại nhưng ẩn đi.",
-      "betaNote": "V2 hiện đang ở giai đoạn Beta.",
+      "betaNote": "Một số tính năng đang ở giai đoạn Beta.",
       "gotIt": "Đã hiểu"
     }
   },
@@ -290,9 +325,17 @@
     "taskCreated": "Đã tạo nhiệm vụ",
     "taskDeleted": "Đã xoá task",
     "taskAssigned": "Đã gán nhiệm vụ",
+    "taskApproved": "Đã phê duyệt task",
+    "taskRejected": "Đã từ chối task",
+    "tasksBulkDeleted": "Đã xóa các task",
     "failedCreateTask": "Không thể tạo nhiệm vụ",
     "failedDeleteTask": "Xoá task thất bại",
-    "failedAssignTask": "Không thể gán nhiệm vụ"
+    "failedAssignTask": "Không thể gán nhiệm vụ",
+    "failedApproveTask": "Không thể phê duyệt task",
+    "failedRejectTask": "Không thể từ chối task",
+    "failedBulkDeleteTasks": "Không thể xóa các task",
+    "workspaceFileDeleted": "Đã xóa file",
+    "failedDeleteWorkspaceFile": "Không thể xóa file"
   },
   "board": {
     "kanban": "Bảng",

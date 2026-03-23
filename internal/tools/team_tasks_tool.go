@@ -42,7 +42,7 @@ func (t *TeamTasksTool) Parameters() map[string]any {
 			},
 			"description": map[string]any{
 				"type":        "string",
-				"description": "Task description (for create or update)",
+				"description": "Task description with clear objectives and requirements. Include all context the assignee needs to complete the task independently.",
 			},
 			"result": map[string]any{
 				"type":        "string",
@@ -52,13 +52,17 @@ func (t *TeamTasksTool) Parameters() map[string]any {
 				"type":        "string",
 				"description": "Text content: comment text, cancel/reject reason, progress update, or ask_user reminder question (must be a question asking the user for input/decision)",
 			},
+			"type": map[string]any{
+				"type":        "string",
+				"description": "Comment type for action=comment: 'note' (default, share findings) or 'blocker' (you are BLOCKED and need leader input — auto-fails task and notifies leader)",
+			},
 			"status": map[string]any{
 				"type":        "string",
 				"description": "Filter for list: '' (all, default), 'active', 'completed', 'in_review'",
 			},
 			"query": map[string]any{
 				"type":        "string",
-				"description": "Search query for action=search",
+				"description": "Search query for action=search (supports keyword AND semantic matching). Use search before create to check for duplicates.",
 			},
 			"priority": map[string]any{
 				"type":        "number",
@@ -94,26 +98,8 @@ func (t *TeamTasksTool) Parameters() map[string]any {
 	}
 }
 
-// v2Actions lists team_tasks actions that require team version >= 2.
-var v2Actions = map[string]bool{
-	"approve": true, "reject": true, "review": true, "comment": true,
-	"progress": true, "attach": true, "update": true,
-	"ask_user": true, "clear_ask_user": true, "retry": true,
-}
-
 func (t *TeamTasksTool) Execute(ctx context.Context, args map[string]any) *Result {
 	action, _ := args["action"].(string)
-
-	// Gate v2-only actions: resolve team once and check version.
-	if v2Actions[action] {
-		team, _, err := t.manager.resolveTeam(ctx)
-		if err != nil {
-			return ErrorResult(err.Error())
-		}
-		if !IsTeamV2(team) {
-			return ErrorResult(fmt.Sprintf("action '%s' requires team version 2 — upgrade in team settings", action))
-		}
-	}
 
 	switch action {
 	case "list":

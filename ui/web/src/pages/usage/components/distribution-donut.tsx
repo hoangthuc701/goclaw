@@ -5,8 +5,8 @@ import { ChartWrapper } from "./chart-wrapper";
 import type { SnapshotBreakdown } from "../hooks/use-usage-analytics";
 
 const PALETTE = [
-  "#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6",
-  "#06b6d4", "#f97316", "#ec4899", "#84cc16", "#6366f1",
+  "#E85D24", "#10b981", "#E87820", "#ef4444", "#F0A020",
+  "#ec4899", "#f59e0b", "#84cc16", "#F8D080", "#f97316",
 ];
 
 const MAX_SLICES = 8;
@@ -35,7 +35,6 @@ export function DistributionDonut({
   metric = "request_count",
 }: DistributionDonutProps) {
   const { t } = useTranslation("usage");
-  const isEmpty = !loading && data.length === 0;
 
   const sorted = [...data].sort((a, b) => b[metric] - a[metric]);
   const top = sorted.slice(0, MAX_SLICES);
@@ -49,8 +48,10 @@ export function DistributionDonut({
   }
 
   const total = slices.reduce((sum, s) => sum + s.value, 0);
+  const isEmpty = !loading && (data.length === 0 || total === 0);
 
-  const handleClick = (entry: PieSectorDataItem) => {
+  const handleClick = (entry: PieSectorDataItem | null | undefined) => {
+    if (!entry) return;
     const name = entry.name as string | undefined;
     if (!name || name === t("analytics.distribution.other")) return;
     onSliceClick?.(name);
@@ -66,17 +67,18 @@ export function DistributionDonut({
             cy="45%"
             innerRadius={55}
             outerRadius={85}
-            paddingAngle={2}
+            paddingAngle={slices.length > 1 ? 2 : 0}
             dataKey="value"
             onClick={handleClick}
             style={{ cursor: onSliceClick ? "pointer" : "default" }}
+            isAnimationActive={false}
             label={false}
           >
             {slices.map((entry, idx) => (
               <Cell
                 key={entry.name}
                 fill={PALETTE[idx % PALETTE.length]}
-                stroke={activeValue === entry.name ? "#1d4ed8" : "transparent"}
+                stroke={activeValue === entry.name ? "#B83D10" : "transparent"}
                 strokeWidth={activeValue === entry.name ? 3 : 0}
                 opacity={activeValue && activeValue !== entry.name ? 0.5 : 1}
               />
@@ -90,9 +92,13 @@ export function DistributionDonut({
           </text>
           <Tooltip
             formatter={(value, name) => {
-              const v = typeof value === "number" ? value : Number(value) || 0;
-              const pct = total > 0 ? ((v / total) * 100).toFixed(1) : "0";
-              return [`${v.toLocaleString()} (${pct}%)`, String(name)];
+              try {
+                const v = typeof value === "number" ? value : Number(value) || 0;
+                const pct = total > 0 ? ((v / total) * 100).toFixed(1) : "0";
+                return [`${v.toLocaleString()} (${pct}%)`, String(name)];
+              } catch {
+                return [String(value), String(name)];
+              }
             }}
           />
           <Legend

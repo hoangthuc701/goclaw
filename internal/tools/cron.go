@@ -12,61 +12,87 @@ import (
 // CronTool lets agents manage Gateway cron jobs.
 // Matching OpenClaw src/agents/tools/cron-tool.ts.
 type CronTool struct {
-	cronStore        store.CronStore
-	groupWriterCache *store.GroupWriterCache // nil = no group restriction
+	cronStore store.CronStore
+	permStore store.ConfigPermissionStore // nil = no group restriction
 }
 
 func NewCronTool(cronStore store.CronStore) *CronTool {
 	return &CronTool{cronStore: cronStore}
 }
 
-// SetGroupWriterCache enables group cron mutation restriction.
-func (t *CronTool) SetGroupWriterCache(c *store.GroupWriterCache) {
-	t.groupWriterCache = c
+// SetConfigPermStore enables group cron mutation restriction.
+func (t *CronTool) SetConfigPermStore(s store.ConfigPermissionStore) {
+	t.permStore = s
 }
 
 func (t *CronTool) Name() string { return "cron" }
 
 func (t *CronTool) Description() string {
-	return `Manage Gateway cron jobs (status/list/add/update/remove/run/runs).
+	return `Manage Gateway cron jobs.
+Always send a JSON object with an "action" field.
 
-ACTIONS:
-- status: Check cron scheduler status
-- list: List jobs (use includeDisabled:true to include disabled)
-- add: Create job (requires job object, see schema below)
-- update: Modify job (requires jobId + patch object)
-- remove: Delete job (requires jobId)
-- run: Trigger job immediately (requires jobId)
-- runs: Get job run history (requires jobId)
+VALID ACTIONS AND EXACT PAYLOAD SHAPES:
+1) status
+{ "action": "status" }
 
-JOB SCHEMA (for add action):
+2) list
+{ "action": "list", "includeDisabled": true|false }
+
+3) add
 {
-  "name": "string (required, lowercase slug)",
-  "schedule": { ... },      // Required: when to run
-  "message": "string",      // Required: what message to send to the agent
-  "deliver": true|false,    // Optional: deliver result to channel (default false)
-  "channel": "channel-name", // Optional: target channel for delivery (auto-filled from context)
-  "to": "chat-id",          // Optional: target chat/recipient ID
-  "agentId": "agent-uuid",  // Optional: which agent handles the job (default: current)
-  "deleteAfterRun": true    // Optional: auto-delete after execution (default true for "at" schedule)
+  "action": "add",
+  "job": {
+    "name": "string",             // required, lowercase slug: [a-z0-9-]+
+    "schedule": { ... },          // required
+    "message": "string",          // required
+    "deliver": true|false,        // optional, default false
+    "channel": "string",          // optional, auto-filled from current channel context
+    "to": "string",               // optional
+    "agentId": "string",          // optional, defaults to current agent
+    "deleteAfterRun": true|false  // optional, default true for schedule.kind="at"
+  }
 }
 
-SCHEDULE TYPES (schedule.kind):
-- "at": One-shot at absolute time
-  { "kind": "at", "atMs": <unix-milliseconds> }
-- "every": Recurring interval
-  { "kind": "every", "everyMs": <interval-ms> }
-- "cron": Cron expression
-  { "kind": "cron", "expr": "<5-field cron expression>", "tz": "<optional IANA timezone, e.g. Asia/Ho_Chi_Minh; omit to use gateway default>" }
+4) update
+{
+  "action": "update",
+  "jobId": "string",
+  "patch": {
+    "name": "string",
+    "schedule": { ... },
+    "message": "string",
+    "deliver": true|false,
+    "channel": "string",
+    "to": "string",
+    "agentId": "string",
+    "deleteAfterRun": true|false,
+    "disabled": true|false
+  }
+}
 
-CRITICAL CONSTRAINTS:
-- name must be a valid slug (lowercase letters, numbers, hyphens only)
-- message is required for add action
-- schedule is required for add action
-- Default: jobs run as isolated agent turns with the specified message
-- Before creating or updating a scheduled job, call the datetime tool first to get the precise current time and unix_ms timestamp. Do NOT guess or estimate timestamps.
+5) remove
+{ "action": "remove", "jobId": "string" }
 
-Use jobId as the canonical identifier; id is accepted for compatibility.`
+6) run
+{ "action": "run", "jobId": "string" }
+
+7) runs
+{ "action": "runs", "jobId": "string" }
+
+SCHEDULE SCHEMA:
+- at: { "kind": "at", "atMs": <unix-milliseconds> }
+- every: { "kind": "every", "everyMs": <interval-ms> }
+- cron: { "kind": "cron", "expr": "<5-field cron>", "tz": "<IANA timezone, e.g. Asia/Ho_Chi_Minh; omit for gateway default>" }
+
+RULES:
+- For action="add", send the job inside "job". Do not place job fields at the root level.
+- For action="update", send changes inside "patch". Do not place patch fields at the root level.
+- Always use "jobId". Do not use "id".
+- "name", "schedule", and "message" are required for add.
+- "name" must match: lowercase letters, numbers, hyphens only.
+- Before creating or updating a scheduled job, call the datetime tool first to get the precise current time and unix_ms timestamp. Never guess timestamps.
+- Omit optional fields when unknown; do not invent placeholder values like "", 0, or null unless required.
+- Jobs run as isolated agent turns using the provided "message".`
 }
 
 func (t *CronTool) Parameters() map[string]any {
@@ -117,8 +143,8 @@ func (t *CronTool) Execute(ctx context.Context, args map[string]any) *Result {
 	}
 
 	// Group write permission check for mutation actions
-	if t.groupWriterCache != nil && (action == "add" || action == "update" || action == "remove") {
-		if err := store.CheckGroupWritePermission(ctx, t.groupWriterCache); err != nil {
+	if t.permStore != nil && (action == "add" || action == "update" || action == "remove") {
+		if err := store.CheckFileWriterPermission(ctx, t.permStore); err != nil {
 			return ErrorResult("permission denied: only file writers can manage cron jobs in group chats")
 		}
 	}
@@ -130,17 +156,17 @@ func (t *CronTool) Execute(ctx context.Context, args map[string]any) *Result {
 	case "status":
 		return t.handleStatus()
 	case "list":
-		return t.handleList(args, agentID, userID)
+		return t.handleList(ctx, args, agentID, userID)
 	case "add":
 		return t.handleAdd(ctx, args, agentID, userID)
 	case "update":
-		return t.handleUpdate(args, agentID, userID)
+		return t.handleUpdate(ctx, args, agentID, userID)
 	case "remove":
-		return t.handleRemove(args, agentID, userID)
+		return t.handleRemove(ctx, args, agentID, userID)
 	case "run":
-		return t.handleRun(args, agentID, userID)
+		return t.handleRun(ctx, args, agentID, userID)
 	case "runs":
-		return t.handleRuns(args, agentID, userID)
+		return t.handleRuns(ctx, args, agentID, userID)
 	default:
 		return ErrorResult(fmt.Sprintf("unknown action: %s", action))
 	}
@@ -152,9 +178,9 @@ func (t *CronTool) handleStatus() *Result {
 	return NewResult(string(data))
 }
 
-func (t *CronTool) handleList(args map[string]any, agentID, userID string) *Result {
+func (t *CronTool) handleList(ctx context.Context, args map[string]any, agentID, userID string) *Result {
 	includeDisabled, _ := args["includeDisabled"].(bool)
-	jobs := t.cronStore.ListJobs(includeDisabled, agentID, userID)
+	jobs := t.cronStore.ListJobs(ctx, includeDisabled, agentID, userID)
 
 	result := map[string]any{
 		"jobs":  jobs,
@@ -237,7 +263,7 @@ func (t *CronTool) handleAdd(ctx context.Context, args map[string]any, agentID, 
 	if !deliver {
 		if ctxChannel := ToolChannelFromCtx(ctx); ctxChannel != "" {
 			switch ctxChannel {
-			case "cli", "system", "subagent", "cron", "delegate":
+			case "cli", "system", "subagent", "cron", "teammate":
 				// internal channels — don't auto-deliver
 			default:
 				deliver = true
@@ -262,9 +288,17 @@ func (t *CronTool) handleAdd(ctx context.Context, args map[string]any, agentID, 
 		agentID = explicit
 	}
 
-	job, err := t.cronStore.AddJob(name, schedule, message, deliver, channel, to, agentID, userID)
+	job, err := t.cronStore.AddJob(ctx, name, schedule, message, deliver, channel, to, agentID, userID)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to create cron job: %v", err))
+	}
+
+	// Set wake_heartbeat if requested (triggers heartbeat after cron job completes)
+	if wh, _ := jobObj["wake_heartbeat"].(bool); wh {
+		wakeTrue := true
+		if updated, uErr := t.cronStore.UpdateJob(ctx, job.ID, store.CronJobPatch{WakeHeartbeat: &wakeTrue}); uErr == nil {
+			job = updated
+		}
 	}
 
 	data, _ := json.MarshalIndent(map[string]any{"job": job}, "", "  ")
@@ -273,8 +307,8 @@ func (t *CronTool) handleAdd(ctx context.Context, args map[string]any, agentID, 
 
 // checkJobOwnership validates that the job belongs to the current agent+user scope.
 // When agentID/userID is empty, all jobs are accessible.
-func (t *CronTool) checkJobOwnership(jobID, agentID, userID string) (*store.CronJob, *Result) {
-	job, ok := t.cronStore.GetJob(jobID)
+func (t *CronTool) checkJobOwnership(ctx context.Context, jobID, agentID, userID string) (*store.CronJob, *Result) {
+	job, ok := t.cronStore.GetJob(ctx, jobID)
 	if !ok {
 		return nil, ErrorResult(fmt.Sprintf("job %s not found", jobID))
 	}
@@ -290,13 +324,13 @@ func (t *CronTool) checkJobOwnership(jobID, agentID, userID string) (*store.Cron
 	return job, nil
 }
 
-func (t *CronTool) handleUpdate(args map[string]any, agentID, userID string) *Result {
+func (t *CronTool) handleUpdate(ctx context.Context, args map[string]any, agentID, userID string) *Result {
 	jobID := resolveJobID(args)
 	if jobID == "" {
 		return ErrorResult("jobId is required for update action")
 	}
 
-	if _, errResult := t.checkJobOwnership(jobID, agentID, userID); errResult != nil {
+	if _, errResult := t.checkJobOwnership(ctx, jobID, agentID, userID); errResult != nil {
 		return errResult
 	}
 
@@ -317,7 +351,7 @@ func (t *CronTool) handleUpdate(args map[string]any, agentID, userID string) *Re
 		}
 	}
 
-	job, err := t.cronStore.UpdateJob(jobID, patch)
+	job, err := t.cronStore.UpdateJob(ctx, jobID, patch)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to update cron job: %v", err))
 	}
@@ -326,17 +360,17 @@ func (t *CronTool) handleUpdate(args map[string]any, agentID, userID string) *Re
 	return NewResult(string(data))
 }
 
-func (t *CronTool) handleRemove(args map[string]any, agentID, userID string) *Result {
+func (t *CronTool) handleRemove(ctx context.Context, args map[string]any, agentID, userID string) *Result {
 	jobID := resolveJobID(args)
 	if jobID == "" {
 		return ErrorResult("jobId is required for remove action")
 	}
 
-	if _, errResult := t.checkJobOwnership(jobID, agentID, userID); errResult != nil {
+	if _, errResult := t.checkJobOwnership(ctx, jobID, agentID, userID); errResult != nil {
 		return errResult
 	}
 
-	if err := t.cronStore.RemoveJob(jobID); err != nil {
+	if err := t.cronStore.RemoveJob(ctx, jobID); err != nil {
 		return ErrorResult(fmt.Sprintf("failed to remove cron job: %v", err))
 	}
 
@@ -344,20 +378,20 @@ func (t *CronTool) handleRemove(args map[string]any, agentID, userID string) *Re
 	return NewResult(string(data))
 }
 
-func (t *CronTool) handleRun(args map[string]any, agentID, userID string) *Result {
+func (t *CronTool) handleRun(ctx context.Context, args map[string]any, agentID, userID string) *Result {
 	jobID := resolveJobID(args)
 	if jobID == "" {
 		return ErrorResult("jobId is required for run action")
 	}
 
-	if _, errResult := t.checkJobOwnership(jobID, agentID, userID); errResult != nil {
+	if _, errResult := t.checkJobOwnership(ctx, jobID, agentID, userID); errResult != nil {
 		return errResult
 	}
 
 	runMode, _ := args["runMode"].(string)
 	force := runMode == "force"
 
-	ran, reason, err := t.cronStore.RunJob(jobID, force)
+	ran, reason, err := t.cronStore.RunJob(ctx, jobID, force)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("failed to run cron job: %v", err))
 	}
@@ -373,12 +407,12 @@ func (t *CronTool) handleRun(args map[string]any, agentID, userID string) *Resul
 	return NewResult(string(data))
 }
 
-func (t *CronTool) handleRuns(args map[string]any, agentID, userID string) *Result {
+func (t *CronTool) handleRuns(ctx context.Context, args map[string]any, agentID, userID string) *Result {
 	jobID := resolveJobID(args)
 
 	// Validate ownership if a specific job is requested
 	if jobID != "" {
-		if _, errResult := t.checkJobOwnership(jobID, agentID, userID); errResult != nil {
+		if _, errResult := t.checkJobOwnership(ctx, jobID, agentID, userID); errResult != nil {
 			return errResult
 		}
 	}
@@ -388,7 +422,7 @@ func (t *CronTool) handleRuns(args map[string]any, agentID, userID string) *Resu
 		limit = int(v)
 	}
 
-	entries, total := t.cronStore.GetRunLog(jobID, limit, 0)
+	entries, total := t.cronStore.GetRunLog(ctx, jobID, limit, 0)
 
 	result := map[string]any{
 		"entries": entries,

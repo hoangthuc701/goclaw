@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 
@@ -86,7 +87,7 @@ func createEmbeddingProvider(name string, cfg *config.Config, memCfg *config.Mem
 	// Fallback: resolve from provider registry (DB-stored providers like "openai-embedding").
 	// Any OpenAI-compatible provider in the registry can serve embeddings.
 	if providerReg != nil {
-		if regProv, err := providerReg.Get(name); err == nil {
+		if regProv, err := providerReg.Get(context.Background(), name); err == nil {
 			if op, ok := regProv.(*providers.OpenAIProvider); ok {
 				embBase := op.APIBase()
 				if apiBase != "" {
@@ -102,15 +103,15 @@ func createEmbeddingProvider(name string, cfg *config.Config, memCfg *config.Mem
 }
 
 func setupSubagents(providerReg *providers.Registry, cfg *config.Config, msgBus *bus.MessageBus, toolsReg *tools.Registry, workspace string, sandboxMgr sandbox.Manager) *tools.SubagentManager {
-	names := providerReg.List()
+	names := providerReg.List(context.Background())
 	if len(names) == 0 {
 		return nil
 	}
 
 	agentCfg := cfg.ResolveAgent("default")
-	provider, err := providerReg.Get(agentCfg.Provider)
+	provider, err := providerReg.Get(context.Background(), agentCfg.Provider)
 	if err != nil {
-		provider, _ = providerReg.Get(names[0])
+		provider, _ = providerReg.Get(context.Background(), names[0])
 	}
 	if provider == nil {
 		return nil
@@ -157,11 +158,12 @@ func setupSubagents(providerReg *providers.Registry, cfg *config.Config, msgBus 
 		return reg
 	}
 
-	return tools.NewSubagentManager(provider, agentCfg.Model, msgBus, toolsFactory, subCfg)
+	return tools.NewSubagentManager(provider, providerReg, agentCfg.Model, msgBus, toolsFactory, subCfg)
 }
 
 // setupTTS creates the TTS manager from config and registers providers.
-// Returns nil if no TTS provider has an API key configured.
+// Edge TTS is always registered (free, no API key required).
+// Always returns a non-nil manager with at least one provider.
 func setupTTS(cfg *config.Config) *tts.Manager {
 	ttsCfg := cfg.Tts
 
@@ -194,13 +196,12 @@ func setupTTS(cfg *config.Config) *tts.Manager {
 		}))
 	}
 
-	if ttsCfg.Edge.Enabled {
-		mgr.RegisterProvider(tts.NewEdgeProvider(tts.EdgeConfig{
-			Voice:     ttsCfg.Edge.Voice,
-			Rate:      ttsCfg.Edge.Rate,
-			TimeoutMs: ttsCfg.TimeoutMs,
-		}))
-	}
+	// Edge TTS is free (no API key) — always register so it's available as primary or fallback.
+	mgr.RegisterProvider(tts.NewEdgeProvider(tts.EdgeConfig{
+		Voice:     ttsCfg.Edge.Voice,
+		Rate:      ttsCfg.Edge.Rate,
+		TimeoutMs: ttsCfg.TimeoutMs,
+	}))
 
 	if key := ttsCfg.MiniMax.APIKey; key != "" {
 		mgr.RegisterProvider(tts.NewMiniMaxProvider(tts.MiniMaxConfig{

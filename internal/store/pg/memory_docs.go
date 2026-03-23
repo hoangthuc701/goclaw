@@ -48,13 +48,21 @@ func (s *PGMemoryStore) GetDocument(ctx context.Context, agentID, userID, path s
 
 	var err error
 	if userID == "" {
+		tc, tcArgs, tcErr := tenantClauseN(ctx, 3)
+		if tcErr != nil {
+			return "", tcErr
+		}
 		err = s.db.QueryRowContext(ctx,
-			"SELECT content FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id IS NULL",
-			aid, path).Scan(&content)
+			"SELECT content FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id IS NULL"+tc,
+			append([]any{aid, path}, tcArgs...)...).Scan(&content)
 	} else {
+		tc, tcArgs, tcErr := tenantClauseN(ctx, 4)
+		if tcErr != nil {
+			return "", tcErr
+		}
 		err = s.db.QueryRowContext(ctx,
-			"SELECT content FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id = $3",
-			aid, path, userID).Scan(&content)
+			"SELECT content FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id = $3"+tc,
+			append([]any{aid, path, userID}, tcArgs...)...).Scan(&content)
 	}
 	if err != nil {
 		return "", err
@@ -67,6 +75,7 @@ func (s *PGMemoryStore) PutDocument(ctx context.Context, agentID, userID, path, 
 	hash := memory.ContentHash(content)
 	id := uuid.Must(uuid.NewV7())
 	now := time.Now()
+	tid := tenantIDForInsert(ctx)
 
 	var uid *string
 	if userID != "" {
@@ -74,27 +83,44 @@ func (s *PGMemoryStore) PutDocument(ctx context.Context, agentID, userID, path, 
 	}
 
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO memory_documents (id, agent_id, user_id, path, content, hash, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`INSERT INTO memory_documents (id, agent_id, user_id, path, content, hash, tenant_id, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		 ON CONFLICT (agent_id, COALESCE(user_id, ''), path)
-		 DO UPDATE SET content = EXCLUDED.content, hash = EXCLUDED.hash, updated_at = EXCLUDED.updated_at`,
-		id, aid, uid, path, content, hash, now,
+		 DO UPDATE SET content = EXCLUDED.content, hash = EXCLUDED.hash, tenant_id = EXCLUDED.tenant_id, updated_at = EXCLUDED.updated_at`,
+		id, aid, uid, path, content, hash, tid, now,
 	)
 	return err
 }
 
 func (s *PGMemoryStore) DeleteDocument(ctx context.Context, agentID, userID, path string) error {
 	aid := mustParseUUID(agentID)
+	var res sql.Result
+	var err error
 	if userID == "" {
-		_, err := s.db.ExecContext(ctx,
-			"DELETE FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id IS NULL",
-			aid, path)
+		tc, tcArgs, tcErr := tenantClauseN(ctx, 3)
+		if tcErr != nil {
+			return tcErr
+		}
+		res, err = s.db.ExecContext(ctx,
+			"DELETE FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id IS NULL"+tc,
+			append([]any{aid, path}, tcArgs...)...)
+	} else {
+		tc, tcArgs, tcErr := tenantClauseN(ctx, 4)
+		if tcErr != nil {
+			return tcErr
+		}
+		res, err = s.db.ExecContext(ctx,
+			"DELETE FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id = $3"+tc,
+			append([]any{aid, path, userID}, tcArgs...)...)
+	}
+	if err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx,
-		"DELETE FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id = $3",
-		aid, path, userID)
-	return err
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("document not found: %s", path)
+	}
+	return nil
 }
 
 func (s *PGMemoryStore) ListDocuments(ctx context.Context, agentID, userID string) ([]store.DocumentInfo, error) {
@@ -103,11 +129,21 @@ func (s *PGMemoryStore) ListDocuments(ctx context.Context, agentID, userID strin
 	var rows *sql.Rows
 	var err error
 	if userID == "" {
+		tc, tcArgs, tcErr := tenantClauseN(ctx, 2)
+		if tcErr != nil {
+			return nil, tcErr
+		}
 		rows, err = s.db.QueryContext(ctx,
-			"SELECT path, hash, user_id, updated_at FROM memory_documents WHERE agent_id = $1 AND user_id IS NULL", aid)
+			"SELECT path, hash, user_id, updated_at FROM memory_documents WHERE agent_id = $1 AND user_id IS NULL"+tc,
+			append([]any{aid}, tcArgs...)...)
 	} else {
+		tc, tcArgs, tcErr := tenantClauseN(ctx, 3)
+		if tcErr != nil {
+			return nil, tcErr
+		}
 		rows, err = s.db.QueryContext(ctx,
-			"SELECT path, hash, user_id, updated_at FROM memory_documents WHERE agent_id = $1 AND (user_id IS NULL OR user_id = $2)", aid, userID)
+			"SELECT path, hash, user_id, updated_at FROM memory_documents WHERE agent_id = $1 AND (user_id IS NULL OR user_id = $2)"+tc,
+			append([]any{aid, userID}, tcArgs...)...)
 	}
 	if err != nil {
 		return nil, err
@@ -148,13 +184,21 @@ func (s *PGMemoryStore) IndexDocument(ctx context.Context, agentID, userID, path
 	// Get document ID
 	var docID uuid.UUID
 	if userID == "" {
+		tc, tcArgs, tcErr := tenantClauseN(ctx, 3)
+		if tcErr != nil {
+			return tcErr
+		}
 		err = s.db.QueryRowContext(ctx,
-			"SELECT id FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id IS NULL",
-			aid, path).Scan(&docID)
+			"SELECT id FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id IS NULL"+tc,
+			append([]any{aid, path}, tcArgs...)...).Scan(&docID)
 	} else {
+		tc, tcArgs, tcErr := tenantClauseN(ctx, 4)
+		if tcErr != nil {
+			return tcErr
+		}
 		err = s.db.QueryRowContext(ctx,
-			"SELECT id FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id = $3",
-			aid, path, userID).Scan(&docID)
+			"SELECT id FROM memory_documents WHERE agent_id = $1 AND path = $2 AND user_id = $3"+tc,
+			append([]any{aid, path, userID}, tcArgs...)...).Scan(&docID)
 	}
 	if err != nil {
 		return err
@@ -169,22 +213,97 @@ func (s *PGMemoryStore) IndexDocument(ctx context.Context, agentID, userID, path
 		return nil
 	}
 
-	// Generate embeddings
+	// Generate embeddings with cache
 	var embeddings [][]float32
 	if s.provider != nil {
-		texts := make([]string, len(chunks))
+		providerName := s.provider.Name()
+		providerModel := s.provider.Model()
+
+		// Compute content hashes for all chunks
+		hashes := make([]string, len(chunks))
 		for i, c := range chunks {
-			texts[i] = c.Text
+			hashes[i] = memory.ContentHash(c.Text)
 		}
-		var embErr error
-		embeddings, embErr = s.provider.Embed(ctx, texts)
-		if embErr != nil {
-			slog.Warn("memory embedding failed, storing chunks without vectors",
-				"path", path, "chunks", len(chunks), "error", embErr)
+
+		// Batch lookup cached embeddings
+		cached, cacheErr := s.lookupEmbeddingCache(ctx, hashes, providerName, providerModel)
+		if cacheErr != nil {
+			slog.Warn("embedding cache lookup failed, falling back to full API call",
+				"path", path, "error", cacheErr)
+			cached = nil
+		}
+
+		// Determine which chunks need fresh embeddings
+		var uncachedIdxs []int
+		var uncachedTexts []string
+		for i, c := range chunks {
+			if cached != nil {
+				if _, ok := cached[hashes[i]]; ok {
+					continue
+				}
+			}
+			uncachedIdxs = append(uncachedIdxs, i)
+			uncachedTexts = append(uncachedTexts, c.Text)
+		}
+
+		if len(cached) > 0 {
+			slog.Debug("embedding cache hit",
+				"path", path, "cached", len(cached), "uncached", len(uncachedTexts))
+		}
+
+		// Call embedding API only for uncached texts
+		var freshEmbeddings [][]float32
+		if len(uncachedTexts) > 0 {
+			var embErr error
+			freshEmbeddings, embErr = s.provider.Embed(ctx, uncachedTexts)
+			if embErr != nil {
+				slog.Warn("memory embedding failed, storing chunks without vectors",
+					"path", path, "chunks", len(chunks), "error", embErr)
+			}
+		}
+
+		// Write fresh embeddings back to cache
+		if len(freshEmbeddings) > 0 {
+			if len(freshEmbeddings) != len(uncachedTexts) {
+				slog.Warn("embedding API returned mismatched count",
+					"expected", len(uncachedTexts), "got", len(freshEmbeddings))
+			}
+			var cacheEntries []embeddingCacheEntry
+			for j, emb := range freshEmbeddings {
+				if j < len(uncachedIdxs) {
+					cacheEntries = append(cacheEntries, embeddingCacheEntry{
+						Hash:      hashes[uncachedIdxs[j]],
+						Embedding: emb,
+					})
+				}
+			}
+			if writeErr := s.writeEmbeddingCache(ctx, cacheEntries, providerName, providerModel); writeErr != nil {
+				slog.Warn("embedding cache write failed", "path", path, "error", writeErr)
+			}
+		}
+
+		// Merge cached + fresh embeddings into final slice
+		if cached != nil || freshEmbeddings != nil {
+			embeddings = make([][]float32, len(chunks))
+			// Fill from cache
+			for i, h := range hashes {
+				if cached != nil {
+					if emb, ok := cached[h]; ok {
+						embeddings[i] = emb
+					}
+				}
+			}
+			// Fill from fresh
+			for j, idx := range uncachedIdxs {
+				if j < len(freshEmbeddings) {
+					embeddings[idx] = freshEmbeddings[j]
+				}
+			}
 		}
 	}
 
 	// Insert chunks
+	tid := tenantIDForInsert(ctx)
 	for i, tc := range chunks {
 		hash := memory.ContentHash(tc.Text)
 		chunkID := uuid.Must(uuid.NewV7())
@@ -195,20 +314,20 @@ func (s *PGMemoryStore) IndexDocument(ctx context.Context, agentID, userID, path
 			uid = &userID
 		}
 
-		if embeddings != nil && i < len(embeddings) {
+		if embeddings != nil && i < len(embeddings) && embeddings[i] != nil {
 			// Insert with embedding via raw SQL (pgvector)
 			s.db.ExecContext(ctx,
-				`INSERT INTO memory_chunks (id, agent_id, document_id, user_id, path, start_line, end_line, hash, text, embedding, updated_at)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11)`,
+				`INSERT INTO memory_chunks (id, agent_id, document_id, user_id, path, start_line, end_line, hash, text, embedding, tenant_id, updated_at)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::vector, $11, $12)`,
 				chunkID, aid, docID, uid, path, tc.StartLine, tc.EndLine, hash, tc.Text,
-				vectorToString(embeddings[i]), now,
+				vectorToString(embeddings[i]), tid, now,
 			)
 		} else {
 			s.db.ExecContext(ctx,
-				`INSERT INTO memory_chunks (id, agent_id, document_id, user_id, path, start_line, end_line, hash, text, updated_at)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+				`INSERT INTO memory_chunks (id, agent_id, document_id, user_id, path, start_line, end_line, hash, text, tenant_id, updated_at)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 				 ON CONFLICT DO NOTHING`,
-				chunkID, aid, docID, uid, path, tc.StartLine, tc.EndLine, hash, tc.Text, now,
+				chunkID, aid, docID, uid, path, tc.StartLine, tc.EndLine, hash, tc.Text, tid, now,
 			)
 		}
 	}

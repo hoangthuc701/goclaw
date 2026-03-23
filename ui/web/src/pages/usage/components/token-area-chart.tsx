@@ -38,11 +38,11 @@ export function TokenAreaChart({ data, loading, granularity }: TokenAreaChartPro
       emptyText={t("analytics.noData")}
     >
       <ResponsiveContainer width="100%" height={300}>
-        <AreaChart key={chartData.length} data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+        <AreaChart key={chartData[0]?.bucket_time ?? chartData.length} data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
           <defs>
             <linearGradient id="inputGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-              <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+              <stop offset="5%" stopColor="#E85D24" stopOpacity={0.3} />
+              <stop offset="95%" stopColor="#E85D24" stopOpacity={0} />
             </linearGradient>
             <linearGradient id="outputGrad" x1="0" y1="0" x2="0" y2="1">
               <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
@@ -61,9 +61,10 @@ export function TokenAreaChart({ data, loading, granularity }: TokenAreaChartPro
             type="monotone"
             dataKey="input_tokens"
             name={t("analytics.tokenChart.input")}
-            stroke="#3b82f6"
+            stroke="#E85D24"
             fill="url(#inputGrad)"
             strokeWidth={2}
+            isAnimationActive={false}
             stackId="tokens"
           />
           <Area
@@ -73,6 +74,7 @@ export function TokenAreaChart({ data, loading, granularity }: TokenAreaChartPro
             stroke="#10b981"
             fill="url(#outputGrad)"
             strokeWidth={2}
+            isAnimationActive={false}
             stackId="tokens"
           />
           {hasCache && (
@@ -80,9 +82,10 @@ export function TokenAreaChart({ data, loading, granularity }: TokenAreaChartPro
               type="monotone"
               dataKey="cache_read_tokens"
               name={t("analytics.tokenChart.cache")}
-              stroke="#06b6d4"
+              stroke="#F0A020"
               fill="none"
               strokeWidth={1.5}
+              isAnimationActive={false}
               strokeDasharray="4 2"
             />
           )}

@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // Options keys used in ChatRequest.Options across providers.
@@ -85,20 +86,22 @@ type ImageContent struct {
 // Stored in session JSONB (~60 bytes each) instead of megabytes for base64.
 // On reload, MediaRefs are resolved to file paths and loaded into Images (for images).
 type MediaRef struct {
-	ID       string `json:"id"`        // unique media ID (uuid)
-	MimeType string `json:"mime_type"` // e.g. "image/jpeg", "application/pdf"
-	Kind     string `json:"kind"`      // "image", "video", "audio", "document"
+	ID       string `json:"id"`                // unique media ID (uuid)
+	MimeType string `json:"mime_type"`         // e.g. "image/jpeg", "application/pdf"
+	Kind     string `json:"kind"`              // "image", "video", "audio", "document"
+	Path     string `json:"path,omitempty"`    // absolute workspace path (persisted for /v1/files/ serving)
 }
 
 // Message represents a conversation message.
 type Message struct {
-	Role       string         `json:"role"` // "system", "user", "assistant", "tool"
-	Content    string         `json:"content"`
-	Thinking   string         `json:"thinking,omitempty"`   // reasoning_content for thinking models (Kimi, DeepSeek, etc.)
-	Images     []ImageContent `json:"images,omitempty"`     // vision: base64 images (runtime only, not persisted)
-	MediaRefs  []MediaRef     `json:"media_refs,omitempty"` // persistent media file references
-	ToolCalls  []ToolCall     `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"` // for role="tool" responses
+	Role            string         `json:"role"` // "system", "user", "assistant", "tool"
+	Content         string         `json:"content"`
+	Thinking        string         `json:"thinking,omitempty"`   // reasoning_content for thinking models (Kimi, DeepSeek, etc.)
+	Images          []ImageContent `json:"-"`                    // vision: base64 images (runtime only, never persisted to DB)
+	MediaRefs       []MediaRef     `json:"media_refs,omitempty"` // persistent media file references
+	ToolCalls       []ToolCall     `json:"tool_calls,omitempty"`
+	ToolCallID      string         `json:"tool_call_id,omitempty"`      // for role="tool" responses
+	IsError         bool           `json:"is_error,omitempty"`          // for role="tool" responses
 
 	// Phase is a Codex-specific field (gpt-5.3-codex) indicating message purpose.
 	// Values: "commentary" (intermediate), "final_answer" (closeout), or "" (unset).
@@ -109,6 +112,11 @@ type Message struct {
 	// RawAssistantContent carries raw provider content blocks through tool loop iterations.
 	// Anthropic requires thinking blocks to be passed back exactly as received.
 	RawAssistantContent json.RawMessage `json:"-"`
+
+	// CreatedAt records when this message was added to the session.
+	// Pointer type so that older messages (stored before this field existed) deserialize as nil,
+	// allowing the frontend to fall back to synthetic timestamps.
+	CreatedAt *time.Time `json:"created_at,omitempty"`
 }
 
 // ToolCall represents a tool invocation requested by the LLM.

@@ -2,6 +2,7 @@ package pg
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
@@ -81,21 +82,37 @@ func (s *PGMemoryStore) ftsSearch(ctx context.Context, query string, agentID any
 	var args []any
 
 	if userID != "" {
-		q = `SELECT path, start_line, end_line, text, user_id,
+		// fixed params: $1=query, $2=agentID, $3=query, $4=userID
+		// tenant clause appended at $5 (if filtered), then LIMIT at $5 or $6
+		tc, tcArgs, err := tenantClauseN(ctx, 5)
+		if err != nil {
+			return nil, err
+		}
+		limitN := 5 + len(tcArgs)
+		q = fmt.Sprintf(`SELECT path, start_line, end_line, text, user_id,
 				ts_rank(tsv, plainto_tsquery('simple', $1)) AS score
 			FROM memory_chunks
 			WHERE agent_id = $2 AND tsv @@ plainto_tsquery('simple', $3)
-			AND (user_id IS NULL OR user_id = $4)
-			ORDER BY score DESC LIMIT $5`
-		args = []any{query, agentID, query, userID, limit}
+			AND (user_id IS NULL OR user_id = $4)%s
+			ORDER BY score DESC LIMIT $%d`, tc, limitN)
+		args = append([]any{query, agentID, query, userID}, tcArgs...)
+		args = append(args, limit)
 	} else {
-		q = `SELECT path, start_line, end_line, text, user_id,
+		// fixed params: $1=query, $2=agentID, $3=query
+		// tenant clause at $4 (if filtered), then LIMIT at $4 or $5
+		tc, tcArgs, err := tenantClauseN(ctx, 4)
+		if err != nil {
+			return nil, err
+		}
+		limitN := 4 + len(tcArgs)
+		q = fmt.Sprintf(`SELECT path, start_line, end_line, text, user_id,
 				ts_rank(tsv, plainto_tsquery('simple', $1)) AS score
 			FROM memory_chunks
 			WHERE agent_id = $2 AND tsv @@ plainto_tsquery('simple', $3)
-			AND user_id IS NULL
-			ORDER BY score DESC LIMIT $4`
-		args = []any{query, agentID, query, limit}
+			AND user_id IS NULL%s
+			ORDER BY score DESC LIMIT $%d`, tc, limitN)
+		args = append([]any{query, agentID, query}, tcArgs...)
+		args = append(args, limit)
 	}
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -120,21 +137,39 @@ func (s *PGMemoryStore) vectorSearch(ctx context.Context, embedding []float32, a
 	var args []any
 
 	if userID != "" {
-		q = `SELECT path, start_line, end_line, text, user_id,
+		// fixed params: $1=vec, $2=agentID, $3=userID
+		// tenant clause at $4, then ORDER vec at $4+len(tcArgs), LIMIT after
+		tc, tcArgs, err := tenantClauseN(ctx, 4)
+		if err != nil {
+			return nil, err
+		}
+		orderN := 4 + len(tcArgs)
+		limitN := orderN + 1
+		q = fmt.Sprintf(`SELECT path, start_line, end_line, text, user_id,
 				1 - (embedding <=> $1::vector) AS score
 			FROM memory_chunks
 			WHERE agent_id = $2 AND embedding IS NOT NULL
-			AND (user_id IS NULL OR user_id = $3)
-			ORDER BY embedding <=> $4::vector LIMIT $5`
-		args = []any{vecStr, agentID, userID, vecStr, limit}
+			AND (user_id IS NULL OR user_id = $3)%s
+			ORDER BY embedding <=> $%d::vector LIMIT $%d`, tc, orderN, limitN)
+		args = append([]any{vecStr, agentID, userID}, tcArgs...)
+		args = append(args, vecStr, limit)
 	} else {
-		q = `SELECT path, start_line, end_line, text, user_id,
+		// fixed params: $1=vec, $2=agentID
+		// tenant clause at $3, then ORDER vec at $3+len(tcArgs), LIMIT after
+		tc, tcArgs, err := tenantClauseN(ctx, 3)
+		if err != nil {
+			return nil, err
+		}
+		orderN := 3 + len(tcArgs)
+		limitN := orderN + 1
+		q = fmt.Sprintf(`SELECT path, start_line, end_line, text, user_id,
 				1 - (embedding <=> $1::vector) AS score
 			FROM memory_chunks
 			WHERE agent_id = $2 AND embedding IS NOT NULL
-			AND user_id IS NULL
-			ORDER BY embedding <=> $3::vector LIMIT $4`
-		args = []any{vecStr, agentID, vecStr, limit}
+			AND user_id IS NULL%s
+			ORDER BY embedding <=> $%d::vector LIMIT $%d`, tc, orderN, limitN)
+		args = append([]any{vecStr, agentID}, tcArgs...)
+		args = append(args, vecStr, limit)
 	}
 
 	rows, err := s.db.QueryContext(ctx, q, args...)
@@ -215,3 +250,4 @@ func hybridMerge(fts, vec []scoredChunk, textWeight, vectorWeight float64, curre
 
 	return results
 }
+

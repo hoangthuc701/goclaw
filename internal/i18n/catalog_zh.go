@@ -93,9 +93,6 @@ func init() {
 		MsgAgentIsTeamLead:      "该Agent已是团队负责人",
 		MsgCannotRemoveTeamLead: "无法移除团队负责人",
 
-		// Delegations
-		MsgDelegationsUnavailable: "委派功能不可用",
-
 		// Channels
 		MsgCannotDeleteDefaultInst: "无法删除默认Channel实例",
 
@@ -172,10 +169,17 @@ func init() {
 		MsgToolSkillManage:     "从对话经验中创建、修补或删除技能",
 		MsgToolPublishSkill:    "将技能目录注册到系统数据库中，使其可被发现和授权",
 		MsgToolTeamTasks:       "查看、创建、更新和完成团队任务板上的任务",
-		MsgToolTeamMessage:     "向代理团队中的队友发送直接消息或广播",
 
 		MsgSkillNudgePostscript: "此任务涉及多个步骤。要我将此过程保存为可重用技能吗？回复 **\"保存技能\"** 或 **\"跳过\"**。",
 		MsgSkillNudge70Pct:      "[System] 您已使用 70% 的迭代预算。请考虑本次会话中的模式是否值得保存为技能。",
 		MsgSkillNudge90Pct:      "[System] 您已使用 90% 的迭代预算。如果本次会话涉及可重用的模式，请考虑在完成前将其保存为技能。",
+
+		MsgInvalidRole: "无效角色：允许的值为 owner、admin、operator、member、viewer",
+
+		MsgContactIDsRequired:  "contact_ids 为必填项",
+		MsgMergeTargetRequired: "必须提供 tenant_user_id 或 create_user 其中之一",
+		MsgTenantUserNotFound:  "未找到租户用户",
+		MsgTenantMismatch:      "租户用户不属于此租户",
+		MsgTenantScopeRequired: "此操作需要指定租户范围",
 	})
 }

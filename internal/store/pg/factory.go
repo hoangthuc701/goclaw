@@ -32,7 +32,6 @@ func NewPGStores(cfg store.StoreConfig) (*store.Stores, error) {
 		Providers: NewPGProviderStore(db, cfg.EncryptionKey),
 		Tracing:   NewPGTracingStore(db),
 		MCP:              NewPGMCPServerStore(db, cfg.EncryptionKey),
-		CustomTools:      NewPGCustomToolStore(db, cfg.EncryptionKey),
 		ChannelInstances: NewPGChannelInstanceStore(db, cfg.EncryptionKey),
 		ConfigSecrets:    NewPGConfigSecretsStore(db, cfg.EncryptionKey),
 		AgentLinks:       NewPGAgentLinkStore(db),
@@ -44,6 +43,11 @@ func NewPGStores(cfg store.StoreConfig) (*store.Stores, error) {
 		Activity:         NewPGActivityStore(db),
 		Snapshots:        NewPGSnapshotStore(db),
 		SecureCLI:        NewPGSecureCLIStore(db, cfg.EncryptionKey),
-		APIKeys:          NewPGAPIKeyStore(db),
+		APIKeys:           NewPGAPIKeyStore(db),
+		Heartbeats:        NewPGHeartbeatStore(db),
+		ConfigPermissions:     NewPGConfigPermissionStore(db),
+		Tenants:               NewPGTenantStore(db),
+		BuiltinToolTenantCfgs: NewPGBuiltinToolTenantConfigStore(db),
+		SkillTenantCfgs:       NewPGSkillTenantConfigStore(db),
 	}, nil
 }

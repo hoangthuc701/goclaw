@@ -80,6 +80,13 @@
     "deprecatedTooltip": "Công cụ này đã ngừng sử dụng và không còn khả dụng",
     "settings": "Cài đặt",
     "configuredVia": "Cấu hình qua trang Config",
+    "tenantOverride": "Ghi đè tenant",
+    "tenantEnabled": "Bật cho tenant này",
+    "tenantDisabled": "Tắt cho tenant này",
+    "tenantDefault": "Dùng mặc định",
+    "resetToDefault": "Đặt lại mặc định",
+    "unconfiguredWarning": "{{count}} công cụ cần cấu hình provider để agent sử dụng đầy đủ năng lực.",
+    "unconfiguredAction": "Cấu hình",
     "categories": {
       "filesystem": "Hệ thống tệp",
       "runtime": "Thời gian chạy",
@@ -132,6 +139,21 @@
       "save": "Lưu",
       "saving": "Đang lưu..."
     },
+    "extractorChain": {
+      "title": "Web Fetch — Chuỗi bộ trích xuất",
+      "description": "Danh sách bộ trích xuất nội dung theo thứ tự. Mỗi URL được thử từ trên xuống cho đến khi một bộ trả về nội dung chất lượng.",
+      "timeout": "Thời gian chờ",
+      "baseUrl": "URL cơ sở",
+      "save": "Lưu",
+      "saving": "Đang lưu…",
+      "cancel": "Hủy",
+      "extractors": {
+        "defuddle": "Defuddle (Cloudflare Worker)",
+        "defuddleDesc": "Trích xuất markdown sạch qua fetch.goclaw.sh sử dụng thư viện Defuddle.",
+        "html-to-markdown": "HTML→Markdown tích hợp",
+        "html-to-markdownDesc": "Bộ chuyển đổi dựa trên DOM trong tiến trình với khả năng phát hiện phần tử ẩn."
+      }
+    },
     "mediaChain": {
       "providerChainSuffix": "— Chuỗi provider",
       "description": "Cấu hình và sắp xếp các provider dự phòng. Kéo để sắp xếp lại — provider đầu tiên được thử trước.",
@@ -183,8 +205,7 @@
       "spawn": "Tạo subagent cho công việc nền",
       "skill_search": "Tìm kiếm skill khả dụng theo từ khóa hoặc mô tả để tìm khả năng phù hợp",
       "use_skill": "Kích hoạt skill để sử dụng khả năng chuyên biệt (đánh dấu tracing)",
-      "team_tasks": "Xem, tạo, cập nhật và hoàn thành tác vụ trên bảng tác vụ nhóm",
-      "team_message": "Gửi tin nhắn trực tiếp hoặc broadcast đến đồng đội trong nhóm agent"
+      "team_tasks": "Xem, tạo, cập nhật và hoàn thành tác vụ trên bảng tác vụ nhóm"
     }
   }
 }

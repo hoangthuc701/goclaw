@@ -6,6 +6,7 @@ const (
 	EventChat               = "chat"
 	EventHealth             = "health"
 	EventCron               = "cron"
+	EventHeartbeat          = "heartbeat"
 	EventExecApprovalReq    = "exec.approval.requested"
 	EventExecApprovalRes    = "exec.approval.resolved"
 	EventPresence           = "presence"
@@ -51,6 +52,9 @@ const (
 	EventTeamTaskDeleted   = "team.task.deleted"
 	EventTeamTaskStale     = "team.task.stale"
 
+	// Emitted when leader starts processing completed team task results (before announce run).
+	EventTeamLeaderProcessing = "team.leader.processing"
+
 	// Team CRUD events (admin operations).
 	EventTeamCreated       = "team.created"
 	EventTeamUpdated       = "team.updated"
@@ -87,9 +91,15 @@ const (
 	// Audit log event (internal, not forwarded to WS clients).
 	EventAuditLog = "audit.log"
 
+	// Session lifecycle events.
+	EventSessionUpdated = "session.updated"
+
 	// Zalo Personal QR login events (client-scoped, not broadcast).
 	EventZaloPersonalQRCode = "zalo.personal.qr.code"
 	EventZaloPersonalQRDone = "zalo.personal.qr.done"
+
+	// Tenant access revocation — forces affected user's UI to logout.
+	EventTenantAccessRevoked = "tenant.access.revoked"
 )
 
 // Agent event subtypes (in payload.type)

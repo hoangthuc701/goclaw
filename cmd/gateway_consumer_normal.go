@@ -12,6 +12,7 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/agent"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
 	"github.com/nextlevelbuilder/goclaw/internal/channels"
+	"github.com/nextlevelbuilder/goclaw/internal/channels/telegram/voiceguard"
 	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/i18n"
 	"github.com/nextlevelbuilder/goclaw/internal/scheduler"
@@ -37,13 +38,21 @@ func processNormalMessage(
 	postTurn tools.PostTurnProcessor,
 	msgBus *bus.MessageBus,
 ) {
+	// Inject tenant from channel instance into context so all store operations
+	// (agent lookup, session creation, etc.) are tenant-scoped.
+	if msg.TenantID != uuid.Nil {
+		ctx = store.WithTenantID(ctx, msg.TenantID)
+	} else {
+		ctx = store.WithTenantID(ctx, store.MasterTenantID)
+	}
+
 	// Determine target agent via bindings or explicit AgentID
 	agentID := msg.AgentID
 	if agentID == "" {
 		agentID = resolveAgentRoute(cfg, msg.Channel, msg.ChatID, msg.PeerKind)
 	}
 
-	agentLoop, err := agents.Get(agentID)
+	agentLoop, err := agents.Get(ctx, agentID)
 	if err != nil {
 		slog.Warn("inbound: agent not found", "agent", agentID, "channel", msg.Channel)
 		return
@@ -95,7 +104,7 @@ func processNormalMessage(
 	// Persist friendly names from channel metadata into session + user profile.
 	sessionMeta := extractSessionMetadata(msg, peerKind)
 	if len(sessionMeta) > 0 {
-		sessStore.SetSessionMetadata(sessionKey, sessionMeta)
+		sessStore.SetSessionMetadata(ctx, sessionKey, sessionMeta)
 		if agentStore != nil {
 			if agentUUID, err := uuid.Parse(agentID); err == nil && agentUUID != uuid.Nil {
 				_ = agentStore.UpdateUserProfileMetadata(ctx, agentUUID, userID, sessionMeta)
@@ -142,7 +151,7 @@ func processNormalMessage(
 
 	// Auto-clear followup reminders when user sends a message on a real channel.
 	// Fire-and-forget: don't block message processing.
-	if teamStore != nil && msg.Channel != tools.ChannelSystem && msg.Channel != tools.ChannelDelegate && msg.Channel != tools.ChannelDashboard {
+	if teamStore != nil && msg.Channel != tools.ChannelSystem && msg.Channel != tools.ChannelTeammate && msg.Channel != tools.ChannelDashboard {
 		go func(ch, cid string) {
 			if n, err := teamStore.ClearFollowupByScope(ctx, ch, cid); err != nil {
 				slog.Warn("auto-clear followup failed", "channel", ch, "chat_id", cid, "error", err)
@@ -269,15 +278,15 @@ func processNormalMessage(
 					})
 				}
 				return
-			case agent.IntentSteer, agent.IntentNewTask:
-				// Mid-run injection: inject into the running loop instead of queueing.
+			case agent.IntentSteer:
+				// Steer: inject into running loop to redirect/add to current task.
 				injected := agents.InjectMessage(sessionKey, agent.InjectedMessage{
 					Content: msg.Content,
 					UserID:  userID,
 				})
 				if injected {
-					slog.Info("inbound: injected mid-run message",
-						"intent", string(intent), "session", sessionKey)
+					slog.Info("inbound: injected steer message",
+						"session", sessionKey)
 					msgBus.PublishOutbound(bus.OutboundMessage{
 						Channel:  msg.Channel,
 						ChatID:   msg.ChatID,
@@ -287,10 +296,19 @@ func processNormalMessage(
 					return
 				}
 				// Fallback: injection failed (channel full) → fall through to scheduler queue
-				slog.Info("inbound: injection failed, queueing as normal",
-					"intent", string(intent), "session", sessionKey)
+				slog.Info("inbound: steer injection failed, queueing as normal",
+					"session", sessionKey)
+			case agent.IntentNewTask:
+				// New unrelated request: fall through to scheduler queue
+				slog.Info("inbound: new task queued behind active run",
+					"session", sessionKey)
 			}
 		}
+	}
+
+	// Inject tenant context from channel instance so all store queries are tenant-scoped.
+	if msg.TenantID != uuid.Nil {
+		ctx = store.WithTenantID(ctx, msg.TenantID)
 	}
 
 	// Inject post-turn dispatch tracker so team task creates are deferred.
@@ -321,7 +339,7 @@ func processNormalMessage(
 	})
 
 	// Handle result asynchronously to not block the flush callback.
-	go func(agentKey, channel, chatID, session, rID string, meta map[string]string, blockReplyEnabled bool, ptd *tools.PendingTeamDispatch) {
+	go func(agentKey, channel, chatID, session, rID, peerKind, inboundContent string, meta map[string]string, blockReplyEnabled bool, ptd *tools.PendingTeamDispatch) {
 		outcome := <-outCh
 
 		// Release team create lock — tasks already visible in DB, other goroutines can list.
@@ -396,11 +414,20 @@ func processNormalMessage(
 			return
 		}
 
+		// Sanitize voice agent replies: replace technical errors with user-friendly fallback.
+		replyContent := voiceguard.SanitizeReply(
+			cfg.Channels.Telegram.VoiceAgentID, agentKey,
+			channel, peerKind, inboundContent, outcome.Result.Content,
+			cfg.Channels.Telegram.AudioGuardFallbackTranscript,
+			cfg.Channels.Telegram.AudioGuardFallbackNoTranscript,
+			cfg.Channels.Telegram.AudioGuardErrorMarkers,
+		)
+
 		// Publish response back to the channel
 		outMsg := bus.OutboundMessage{
 			Channel:  channel,
 			ChatID:   chatID,
-			Content:  outcome.Result.Content,
+			Content:  replyContent,
 			Metadata: meta,
 		}
 
@@ -409,8 +436,8 @@ func processNormalMessage(
 		msgBus.PublishOutbound(outMsg)
 
 		// Auto-set followup when lead agent replies on a real channel with in_progress tasks.
-		if teamStore != nil && channel != tools.ChannelSystem && channel != tools.ChannelDelegate && channel != tools.ChannelDashboard {
-			go autoSetFollowup(ctx, teamStore, agentStore, agentKey, channel, chatID, outcome.Result.Content)
+		if teamStore != nil && channel != tools.ChannelSystem && channel != tools.ChannelTeammate && channel != tools.ChannelDashboard {
+			go autoSetFollowup(ctx, teamStore, agentStore, agentKey, channel, chatID, replyContent)
 		}
-	}(agentID, msg.Channel, msg.ChatID, sessionKey, runID, outMeta, blockReply, ptd)
+	}(agentID, msg.Channel, msg.ChatID, sessionKey, runID, peerKind, msg.Content, outMeta, blockReply, ptd)
 }

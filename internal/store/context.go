@@ -25,8 +25,16 @@ const (
 	LocaleKey contextKey = "goclaw_locale"
 	// SharedMemoryKey indicates memory should be shared (no per-user scoping).
 	SharedMemoryKey contextKey = "goclaw_shared_memory"
+	// SharedKGKey indicates KG should be shared across all users of the agent (no per-user scoping).
+	SharedKGKey contextKey = "goclaw_shared_kg"
 	// ShellDenyGroupsKey holds per-agent shell deny group overrides.
 	ShellDenyGroupsKey contextKey = "goclaw_shell_deny_groups"
+	// TenantIDKey is the context key for the tenant UUID.
+	TenantIDKey contextKey = "goclaw_tenant_id"
+	// CrossTenantKey indicates the caller has cross-tenant access (owner/system admin).
+	CrossTenantKey contextKey = "goclaw_cross_tenant"
+	// TenantSlugKey stores the tenant's URL-safe slug for filesystem paths.
+	TenantSlugKey contextKey = "goclaw_tenant_slug"
 )
 
 // WithShellDenyGroups returns a new context with shell deny group overrides.
@@ -125,6 +133,26 @@ func MemoryUserID(ctx context.Context) string {
 	return UserIDFromContext(ctx)
 }
 
+// KGUserID returns the userID to use for knowledge graph operations.
+// Returns "" (agent-level scope) when shared KG is active, otherwise the per-user ID.
+func KGUserID(ctx context.Context) string {
+	if IsSharedKG(ctx) {
+		return ""
+	}
+	return UserIDFromContext(ctx)
+}
+
+// WithSharedKG returns a context flagged for shared knowledge graph (agent-level, no per-user scoping).
+func WithSharedKG(ctx context.Context) context.Context {
+	return context.WithValue(ctx, SharedKGKey, true)
+}
+
+// IsSharedKG returns true if the knowledge graph should be shared across users.
+func IsSharedKG(ctx context.Context) bool {
+	v, _ := ctx.Value(SharedKGKey).(bool)
+	return v
+}
+
 // WithLocale returns a new context with the given locale.
 func WithLocale(ctx context.Context, locale string) context.Context {
 	return context.WithValue(ctx, LocaleKey, locale)
@@ -136,4 +164,43 @@ func LocaleFromContext(ctx context.Context) string {
 		return v
 	}
 	return "en"
+}
+
+// WithTenantID returns a new context with the given tenant UUID.
+func WithTenantID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, TenantIDKey, id)
+}
+
+// TenantIDFromContext extracts the tenant UUID from context.
+// Returns uuid.Nil if not set (fail-closed — callers must check).
+func TenantIDFromContext(ctx context.Context) uuid.UUID {
+	if v, ok := ctx.Value(TenantIDKey).(uuid.UUID); ok {
+		return v
+	}
+	return uuid.Nil
+}
+
+// WithCrossTenant returns a context flagged for cross-tenant access.
+// Used by owner/system admin callers who can access all tenants.
+func WithCrossTenant(ctx context.Context) context.Context {
+	return context.WithValue(ctx, CrossTenantKey, true)
+}
+
+// IsCrossTenant returns true if the caller has cross-tenant access.
+func IsCrossTenant(ctx context.Context) bool {
+	v, _ := ctx.Value(CrossTenantKey).(bool)
+	return v
+}
+
+// WithTenantSlug returns a new context with the given tenant slug.
+func WithTenantSlug(ctx context.Context, slug string) context.Context {
+	return context.WithValue(ctx, TenantSlugKey, slug)
+}
+
+// TenantSlugFromContext extracts the tenant slug from context. Returns "" if not set.
+func TenantSlugFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(TenantSlugKey).(string); ok {
+		return v
+	}
+	return ""
 }

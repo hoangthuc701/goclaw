@@ -23,11 +23,11 @@ func Default() *Config {
 				RestrictToWorkspace: true,
 				Provider:            "anthropic",
 				Model:               "claude-sonnet-4-5-20250929",
-				MaxTokens:           8192,
-				Temperature:         0.7,
-				MaxToolIterations:   20,
+				MaxTokens:           DefaultMaxTokens,
+				Temperature:         DefaultTemperature,
+				MaxToolIterations:   DefaultMaxIterations,
 				MaxToolCalls:        25,
-				ContextWindow:       200000,
+				ContextWindow:       DefaultContextWindow,
 				Subagents: &SubagentsConfig{
 					MaxConcurrent: 20,
 					MaxSpawnDepth: 1,
@@ -42,7 +42,7 @@ func Default() *Config {
 		Gateway: GatewayConfig{
 			Host:            "0.0.0.0",
 			Port:            18790,
-			MaxMessageChars: 32000,
+			MaxMessageChars: DefaultMaxMessageChars,
 			RateLimitRPM:    20,
 		},
 		Tools: ToolsConfig{
@@ -203,9 +203,15 @@ func (c *Config) applyEnvOverrides() {
 		c.Telemetry.Insecure = v == "true" || v == "1"
 	}
 
-	// Owner IDs from env (comma-separated)
+	// Owner IDs from env (comma-separated, whitespace-trimmed)
 	if v := os.Getenv("GOCLAW_OWNER_IDS"); v != "" {
-		c.Gateway.OwnerIDs = strings.Split(v, ",")
+		var ids []string
+		for _, id := range strings.Split(v, ",") {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				ids = append(ids, trimmed)
+			}
+		}
+		c.Gateway.OwnerIDs = ids
 	}
 
 	// Tailscale (tsnet)

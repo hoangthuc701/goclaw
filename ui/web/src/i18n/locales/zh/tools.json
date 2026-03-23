@@ -17,6 +17,13 @@
     },
     "categoryCount": "{{count}} 个分类",
     "configuredVia": "通过配置页面配置",
+    "tenantOverride": "租户覆盖",
+    "tenantEnabled": "已为此租户启用",
+    "tenantDisabled": "已为此租户禁用",
+    "tenantDefault": "使用默认",
+    "resetToDefault": "恢复默认",
+    "unconfiguredWarning": "{{count}} 个工具需要配置 Provider 才能让 Agent 发挥全部能力。",
+    "unconfiguredAction": "配置",
     "description": "管理系统内置工具。全局启用/禁用或配置设置。",
     "emptyDescription": "尚未初始化任何内置工具。",
     "emptyTitle": "暂无内置工具",
@@ -45,6 +52,21 @@
       "save": "保存",
       "saving": "保存中...",
       "title": "知识图谱设置"
+    },
+    "extractorChain": {
+      "title": "Web Fetch — 提取器链",
+      "description": "有序内容提取器列表。每个 URL 从上到下依次尝试，直到某个提取器返回高质量内容。",
+      "timeout": "超时",
+      "baseUrl": "基础 URL",
+      "save": "保存",
+      "saving": "保存中…",
+      "cancel": "取消",
+      "extractors": {
+        "defuddle": "Defuddle（Cloudflare Worker）",
+        "defuddleDesc": "通过 fetch.goclaw.sh 使用 Defuddle 库提取干净的 Markdown。",
+        "html-to-markdown": "内置 HTML→Markdown",
+        "html-to-markdownDesc": "进程内基于 DOM 的转换器，具备隐藏元素检测功能。"
+      }
     },
     "mediaChain": {
       "addProvider": "添加Provider",
@@ -119,8 +141,7 @@
       "spawn": "生成子Agent进行后台工作",
       "skill_search": "按关键字或描述搜索可用Skill以找到相关能力",
       "use_skill": "激活Skill以使用其专业能力（追踪标记）",
-      "team_tasks": "查看、创建、更新和完成团队任务板上的任务",
-      "team_message": "向Agent团队中的队友发送直接消息或广播"
+      "team_tasks": "查看、创建、更新和完成团队任务板上的任务"
     }
   },
   "custom": {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
+	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
 // HandleMessage overrides BaseChannel to allow messages when the chatID (Slack channel)
@@ -28,6 +29,12 @@ func (c *Channel) HandleMessage(senderID, chatID, content string, mediaPaths []s
 	var mediaFiles []bus.MediaFile
 	for _, p := range mediaPaths {
 		mediaFiles = append(mediaFiles, bus.MediaFile{Path: p})
+	}
+
+	// Collect contact for processed messages (DM + group-mentioned).
+	if cc := c.ContactCollector(); cc != nil {
+		ctx := store.WithTenantID(context.Background(), c.TenantID())
+		cc.EnsureContact(ctx, c.Type(), c.Name(), userID, userID, metadata["username"], "", peerKind)
 	}
 
 	c.Bus().PublishInbound(bus.InboundMessage{

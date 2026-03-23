@@ -52,14 +52,16 @@ RUN set -eux; \
         apk add --no-cache docker-cli; \
     fi; \
     if [ "$ENABLE_FULL_SKILLS" = "true" ]; then \
-        apk add --no-cache python3 py3-pip nodejs npm pandoc github-cli; \
+        apk add --no-cache python3 py3-pip nodejs npm pandoc github-cli poppler-utils bash; \
         pip3 install --no-cache-dir --break-system-packages \
-            pypdf openpyxl pandas python-pptx markitdown defusedxml lxml; \
+            pypdf openpyxl pandas python-pptx markitdown defusedxml lxml \
+            pdfplumber pdf2image anthropic; \
         npm install -g --cache /tmp/npm-cache docx pptxgenjs; \
         rm -rf /tmp/npm-cache /root/.cache /var/cache/apk/*; \
     else \
         if [ "$ENABLE_PYTHON" = "true" ]; then \
             apk add --no-cache python3 py3-pip; \
+            pip3 install --no-cache-dir --break-system-packages edge-tts; \
         fi; \
         if [ "$ENABLE_NODE" = "true" ]; then \
             apk add --no-cache nodejs npm; \
@@ -76,14 +78,37 @@ COPY --from=builder /out/pkg-helper /app/pkg-helper
 COPY --from=builder /src/migrations/ /app/migrations/
 COPY --from=builder /src/skills/ /app/bundled-skills/
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+
+# Fix Windows git clone issues:
+# 1. CRLF line endings in shell scripts (Windows git adds \r)
+# 2. Broken symlinks: On Windows (core.symlinks=false), git creates text files
+#    or skips symlinks entirely. Skills like docx/pptx/xlsx need _shared/office
+#    module in their scripts/ dir (originally symlinked as scripts/office -> ../../_shared/office).
+RUN set -eux; \
+    sed -i 's/\r$//' /app/docker-entrypoint.sh; \
+    cd /app/bundled-skills; \
+    for skill in docx pptx xlsx; do \
+        if [ -d "${skill}/scripts" ] && [ ! -d "${skill}/scripts/office" ]; then \
+            rm -f "${skill}/scripts/office"; \
+            cp -r _shared/office "${skill}/scripts/office"; \
+        fi; \
+    done
+
 RUN chmod +x /app/docker-entrypoint.sh && \
     chmod 755 /app/pkg-helper && chown root:root /app/pkg-helper
 
-# Create data directories (owned by goclaw user).
-# Binaries and entrypoint stay root-owned (readable by all).
-RUN mkdir -p /app/workspace /app/data /app/skills /app/tsnet-state /app/.goclaw \
-    && chown -R goclaw:goclaw /app/workspace /app/data /app/skills /app/tsnet-state /app/.goclaw \
-    && chown goclaw:goclaw /app/bundled-skills
+# Create data directories.
+# .runtime has split ownership: root owns the dir (so pkg-helper can write apk-packages),
+# while pip/npm subdirs are goclaw-owned (runtime installs by the app process).
+RUN mkdir -p /app/workspace /app/data/.runtime/pip /app/data/.runtime/npm-global/lib \
+        /app/data/.runtime/pip-cache /app/skills /app/tsnet-state /app/.goclaw \
+    && touch /app/data/.runtime/apk-packages \
+    && chown -R goclaw:goclaw /app/workspace /app/skills /app/tsnet-state /app/.goclaw \
+    && chown goclaw:goclaw /app/bundled-skills /app/data \
+    && chown root:goclaw /app/data/.runtime /app/data/.runtime/apk-packages \
+    && chmod 0750 /app/data/.runtime \
+    && chmod 0640 /app/data/.runtime/apk-packages \
+    && chown -R goclaw:goclaw /app/data/.runtime/pip /app/data/.runtime/npm-global /app/data/.runtime/pip-cache
 
 # Default environment
 ENV GOCLAW_CONFIG=/app/config.json \

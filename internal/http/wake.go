@@ -13,13 +13,20 @@ import (
 	"github.com/nextlevelbuilder/goclaw/internal/permissions"
 	"github.com/nextlevelbuilder/goclaw/internal/sessions"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
+	"github.com/nextlevelbuilder/goclaw/internal/tools"
 )
 
 // WakeHandler handles POST /v1/agents/{id}/wake — external trigger API.
 // Allows orchestrators (Paperclip, n8n, etc.) to trigger agent runs via HTTP.
 type WakeHandler struct {
-	agents *agent.Router
-	token  string
+	agents   *agent.Router
+	token    string
+	postTurn tools.PostTurnProcessor
+}
+
+// SetPostTurnProcessor sets the post-turn processor for team task dispatch.
+func (h *WakeHandler) SetPostTurnProcessor(pt tools.PostTurnProcessor) {
+	h.postTurn = pt
 }
 
 // NewWakeHandler creates a handler for the wake endpoint.
@@ -86,7 +93,7 @@ func (h *WakeHandler) handleWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loop, err := h.agents.Get(agentID)
+	loop, err := h.agents.Get(r.Context(), agentID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": i18n.T(locale, i18n.MsgNotFound, "agent", agentID)})
 		return
@@ -110,6 +117,9 @@ func (h *WakeHandler) handleWake(w http.ResponseWriter, r *http.Request) {
 
 	runID := uuid.NewString()
 	slog.Info("wake request", "agent", agentID, "user", userID, "session", sessionKey)
+
+	ctx, drainTeamDispatch := tools.InjectTeamDispatch(ctx, h.postTurn)
+	defer drainTeamDispatch()
 
 	result, err := loop.Run(ctx, agent.RunRequest{
 		SessionKey: sessionKey,

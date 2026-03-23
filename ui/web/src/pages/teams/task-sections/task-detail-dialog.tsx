@@ -4,13 +4,55 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import { Trash2 } from "lucide-react";
+import {
+  Trash2, ArrowUp, ArrowDown, ArrowRight, AlertTriangle,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { formatDate } from "@/lib/format";
-import { toast } from "@/stores/use-toast-store";
+import { useWsEvent } from "@/hooks/use-ws-event";
+import { Events } from "@/api/protocol";
 import type { TeamTaskData, TeamTaskComment, TeamTaskEvent, TeamTaskAttachment } from "@/types/team";
+import type { TeamTaskEventPayload } from "@/types/team-events";
 import { taskStatusBadgeVariant, isTerminalStatus } from "./task-utils";
+import { TaskDetailContent } from "./task-detail-content";
+import { TaskDetailAttachments } from "./task-detail-attachments";
+import { TaskDetailComments } from "./task-detail-comments";
+import { TaskDetailTimeline } from "./task-detail-timeline";
+
+/* ── Priority helpers (numeric: 1=low … 4=critical) ───────────── */
+
+const PRIORITY_CONFIG: Record<number, { icon: typeof ArrowUp; color: string; label: string }> = {
+  4: { icon: AlertTriangle, color: "text-red-500", label: "critical" },
+  3: { icon: ArrowUp, color: "text-orange-500", label: "high" },
+  2: { icon: ArrowRight, color: "text-yellow-500", label: "medium" },
+  1: { icon: ArrowDown, color: "text-muted-foreground", label: "low" },
+};
+
+function PriorityIcon({ priority }: { priority?: number }) {
+  const cfg = priority != null ? PRIORITY_CONFIG[priority] : undefined;
+  if (!cfg) return null;
+  const Icon = cfg.icon;
+  return <Icon className={`h-3.5 w-3.5 ${cfg.color}`} />;
+}
+
+function priorityLabel(priority?: number) {
+  return priority != null ? (PRIORITY_CONFIG[priority]?.label ?? String(priority)) : "\u2014";
+}
+
+/* ── Metadata item ────────────────────────────────────────────── */
+
+function MetaItem({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground mb-0.5">{label}</dt>
+      <dd className="font-medium">{children}</dd>
+    </div>
+  );
+}
+
+/* ── Props ────────────────────────────────────────────────────── */
 
 interface TaskDetailDialogProps {
   task: TeamTaskData;
@@ -22,6 +64,7 @@ interface TaskDetailDialogProps {
     events: TeamTaskEvent[]; attachments: TeamTaskAttachment[];
   }>;
   deleteTask?: (teamId: string, taskId: string) => Promise<void>;
+  onAddComment?: (teamId: string, taskId: string, content: string) => Promise<void>;
   taskLookup?: Map<string, string>;
   memberLookup?: Map<string, string>;
   emojiLookup?: Map<string, string>;
@@ -30,11 +73,12 @@ interface TaskDetailDialogProps {
 
 export function TaskDetailDialog({
   task, teamId, isTeamV2, onClose,
-  getTaskDetail, deleteTask, taskLookup, memberLookup, emojiLookup, onNavigateTask,
+  getTaskDetail, deleteTask, onAddComment, taskLookup, memberLookup, emojiLookup, onNavigateTask,
 }: TaskDetailDialogProps) {
   const { t } = useTranslation("teams");
   const [events, setEvents] = useState<TeamTaskEvent[]>([]);
   const [attachments, setAttachments] = useState<TeamTaskAttachment[]>([]);
+  const [comments, setComments] = useState<TeamTaskComment[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -43,53 +87,71 @@ export function TaskDetailDialog({
       const res = await getTaskDetail(teamId, task.id);
       setEvents(res.events ?? []);
       setAttachments(res.attachments ?? []);
+      setComments(res.comments ?? []);
     } catch { /* partial data acceptable */ }
   }, [getTaskDetail, teamId, task.id]);
 
   useEffect(() => { loadDetail(); }, [loadDetail]);
 
-  const resolveMember = (id?: string) =>
-    (id && memberLookup?.get(id)) || undefined;
+  const onCommentEvent = useCallback((payload: unknown) => {
+    const p = payload as TeamTaskEventPayload;
+    if (p?.task_id === task.id) loadDetail();
+  }, [task.id, loadDetail]);
+  useWsEvent(Events.TEAM_TASK_COMMENTED, onCommentEvent);
 
-  const resolveEmoji = (id?: string) =>
-    (id && emojiLookup?.get(id)) || undefined;
+  const resolveMember = (id?: string) => (id && memberLookup?.get(id)) || undefined;
+  const resolveEmoji = (id?: string) => (id && emojiLookup?.get(id)) || undefined;
 
   const handleDelete = async () => {
     if (!deleteTask) return;
     setDeleting(true);
-    try {
-      await deleteTask(teamId, task.id);
-      toast.success(t("toast.taskDeleted"));
-      onClose();
-    } catch {
-      toast.error(t("toast.failedDeleteTask"));
-    } finally {
-      setDeleting(false);
-      setConfirmDelete(false);
-    }
+    try { await deleteTask(teamId, task.id); onClose(); }
+    catch { /* toast handled by hook */ }
+    finally { setDeleting(false); setConfirmDelete(false); }
   };
 
   const ownerEmoji = resolveEmoji(task.owner_agent_id);
   const canDelete = deleteTask && isTerminalStatus(task.status);
 
+  const handleAddComment = onAddComment
+    ? async (content: string) => { await onAddComment(teamId, task.id, content); await loadDetail(); }
+    : undefined;
+
   return (
     <Dialog open onOpenChange={() => onClose()}>
       <DialogContent className="max-h-[85vh] w-[95vw] flex flex-col sm:max-w-4xl">
+        {/* ── Header: badges + subject as title ── */}
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+          <div className="flex items-center gap-2 mb-1">
             {task.identifier && (
               <Badge variant="outline" className="font-mono text-xs">{task.identifier}</Badge>
             )}
-            {t("tasks.detail.title")}
-          </DialogTitle>
+            <Badge variant={taskStatusBadgeVariant(task.status)} className="text-xs">
+              {task.status.replace(/_/g, " ")}
+            </Badge>
+          </div>
+          <DialogTitle className="text-base sm:text-lg">{task.subject}</DialogTitle>
         </DialogHeader>
 
+        {/* ── Scrollable body ── */}
         <div className="space-y-4 overflow-y-auto min-h-0 -mx-4 px-4 sm:-mx-6 sm:px-6">
-          {/* Subject */}
-          <div className="rounded-md border p-3">
-            <p className="mb-1 text-xs font-medium text-muted-foreground">{t("tasks.detail.subject")}</p>
-            <p className="text-sm font-medium">{task.subject}</p>
-          </div>
+
+          {/* Progress bar (V2) */}
+          {isTeamV2 && task.progress_percent != null && task.progress_percent > 0 && !isTerminalStatus(task.status) && (() => {
+            const pct = Math.min(100, Math.max(0, task.progress_percent));
+            return (
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{t("tasks.detail.progress")}</span>
+                  <span>{pct}%</span>
+                </div>
+                <div className="h-2 w-full rounded-full bg-muted">
+                  <div className="h-2 rounded-full bg-primary transition-all" style={{ width: `${pct}%` }} />
+                </div>
+                {task.progress_step && <p className="text-xs text-muted-foreground">{task.progress_step}</p>}
+              </div>
+            );
+          })()}
 
           {/* Follow-up banner (V2) */}
           {isTeamV2 && task.followup_at && task.status === "in_progress" && (
@@ -120,55 +182,35 @@ export function TaskDetailDialog({
             </div>
           )}
 
-          {/* Progress bar (V2) */}
-          {isTeamV2 && task.progress_percent != null && task.progress_percent > 0 && !isTerminalStatus(task.status) && (
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs text-muted-foreground">
-                <span>{t("tasks.detail.progress")}</span>
-                <span>{task.progress_percent}%</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-muted">
-                <div className="h-2 rounded-full bg-primary transition-all" style={{ width: `${task.progress_percent}%` }} />
-              </div>
-              {task.progress_step && <p className="text-xs text-muted-foreground">{task.progress_step}</p>}
-            </div>
-          )}
-
-          {/* Summary grid */}
-          <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-            <div>
-              <span className="text-muted-foreground">{t("tasks.detail.status")}</span>{" "}
-              <Badge variant={taskStatusBadgeVariant(task.status)} className="text-xs">{task.status.replace(/_/g, " ")}</Badge>
-            </div>
-            <div>
-              <span className="text-muted-foreground">{t("tasks.detail.priority")}</span>{" "}
-              <span className="font-medium">{task.priority}</span>
-            </div>
-            <div>
-              <span className="text-muted-foreground">{t("tasks.detail.owner")}</span>{" "}
-              <span className="font-medium">
-                {ownerEmoji && <span className="mr-1">{ownerEmoji}</span>}
-                {resolveMember(task.owner_agent_id) || task.owner_agent_key || "\u2014"}
+          {/* Metadata grid */}
+          <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 rounded-lg bg-muted/30 p-4 text-sm">
+            <MetaItem label={t("tasks.detail.priority")}>
+              <span className="flex items-center gap-1.5">
+                <PriorityIcon priority={task.priority} />
+                <span className="capitalize">{priorityLabel(task.priority)}</span>
               </span>
-            </div>
+            </MetaItem>
+            <MetaItem label={t("tasks.detail.owner")}>
+              {ownerEmoji && <span className="mr-1">{ownerEmoji}</span>}
+              {resolveMember(task.owner_agent_id) || task.owner_agent_key || "\u2014"}
+            </MetaItem>
             {task.task_type && task.task_type !== "general" && (
-              <div>
-                <span className="text-muted-foreground">{t("tasks.detail.type")}</span>{" "}
+              <MetaItem label={t("tasks.detail.type")}>
                 <Badge variant="outline" className="text-xs">{task.task_type}</Badge>
-              </div>
+              </MetaItem>
             )}
             {task.created_at && (
-              <div><span className="text-muted-foreground">{t("tasks.detail.created")}</span> {formatDate(task.created_at)}</div>
+              <MetaItem label={t("tasks.detail.created")}>{formatDate(task.created_at)}</MetaItem>
             )}
             {task.updated_at && (
-              <div><span className="text-muted-foreground">{t("tasks.detail.updated")}</span> {formatDate(task.updated_at)}</div>
+              <MetaItem label={t("tasks.detail.updated")}>{formatDate(task.updated_at)}</MetaItem>
             )}
-          </div>
+          </dl>
 
           {/* Blocked by */}
           {task.blocked_by && task.blocked_by.length > 0 && (
             <div className="text-sm">
-              <span className="text-muted-foreground">{t("tasks.detail.blockedBy")}</span>{" "}
+              <span className="text-muted-foreground">{t("tasks.detail.blockedBy")}</span>
               <div className="mt-1 flex flex-wrap gap-1">
                 {task.blocked_by.map((id) => (
                   <Badge
@@ -184,57 +226,23 @@ export function TaskDetailDialog({
             </div>
           )}
 
-          {/* Description */}
-          {task.description && (
-            <div className="rounded-md border p-3">
-              <p className="mb-1 text-xs font-medium text-muted-foreground">{t("tasks.detail.description")}</p>
-              <pre className="whitespace-pre-wrap break-words text-sm">{task.description}</pre>
-            </div>
+          <Separator />
+
+          {/* Content sections */}
+          <TaskDetailContent description={task.description} result={task.result} />
+
+          {isTeamV2 && <TaskDetailAttachments attachments={attachments} />}
+
+          {isTeamV2 && (
+            <TaskDetailComments comments={comments} onAddComment={handleAddComment} />
           )}
 
-          {/* Result */}
-          {task.result && (
-            <div className="rounded-md border p-3">
-              <p className="mb-1 text-xs font-medium text-muted-foreground">{t("tasks.detail.result")}</p>
-              <pre className="max-h-[40vh] overflow-y-auto whitespace-pre-wrap break-words text-sm">{task.result}</pre>
-            </div>
+          {isTeamV2 && (
+            <TaskDetailTimeline events={events} resolveMember={resolveMember} />
           )}
-
-          {/* Attachments (V2) */}
-          {isTeamV2 && attachments.length > 0 && (
-            <div className="rounded-md border p-3">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">{t("tasks.detail.attachments")}</p>
-              <div className="space-y-1">
-                {attachments.map((a) => (
-                  <div key={a.id} className="flex items-center gap-2 text-sm">
-                    <span className="font-medium">{a.file_name || a.file_id}</span>
-                    <span className="text-xs text-muted-foreground">{formatDate(a.created_at)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Timeline (V2) */}
-          {isTeamV2 && events.length > 0 && (
-            <div className="rounded-md border p-3">
-              <p className="mb-2 text-xs font-medium text-muted-foreground">{t("tasks.detail.timeline")}</p>
-              <div className="space-y-2">
-                {events.map((e) => (
-                  <div key={e.id} className="flex items-center gap-2 text-xs">
-                    <span className="text-muted-foreground">{formatDate(e.created_at)}</span>
-                    <Badge variant="outline" className="text-[10px]">{e.event_type}</Badge>
-                    <span className="text-muted-foreground">
-                      {e.actor_type === "human" ? "Human" : (resolveMember(e.actor_id) || e.actor_id.slice(0, 8))}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
         </div>
 
+        {/* Footer */}
         {canDelete && (
           <div className="flex justify-end border-t pt-3">
             <Button variant="destructive" size="sm" onClick={() => setConfirmDelete(true)}>

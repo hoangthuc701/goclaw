@@ -8,7 +8,6 @@ import { BoardContainer } from "./board/board-container";
 import { TeamInfoDialog } from "./board/team-info-dialog";
 import { TeamMembersDialog } from "./board/team-members-dialog";
 import { TeamWorkspaceDialog } from "./board/team-workspace-dialog";
-import { TeamVersionModal } from "./team-version-modal";
 import type { TeamData, TeamMemberData, TeamAccessSettings, ScopeEntry } from "@/types/team";
 
 interface TeamDetailPageProps {
@@ -20,8 +19,16 @@ export function TeamDetailPage({ teamId, onBack }: TeamDetailPageProps) {
   const { t } = useTranslation("teams");
   const {
     getTeam, getTeamTasks, getTeamScopes, addMember, removeMember, deleteTeam,
-    getTaskDetail, getTaskLight, deleteTask, deleteTasksBulk,
+    getTaskDetail, getTaskLight, deleteTask, deleteTasksBulk, addTaskComment,
   } = useTeams();
+
+  // Wrap addTaskComment to match (teamId, taskId, content) signature expected by UI components.
+  const handleAddComment = useCallback(
+    async (tId: string, taskId: string, content: string) => {
+      await addTaskComment(taskId, content, tId);
+    },
+    [addTaskComment],
+  );
 
   const [team, setTeam] = useState<TeamData | null>(null);
   const [members, setMembers] = useState<TeamMemberData[]>([]);
@@ -33,7 +40,6 @@ export function TeamDetailPage({ teamId, onBack }: TeamDetailPageProps) {
   const [infoOpen, setInfoOpen] = useState(false);
   const [membersOpen, setMembersOpen] = useState(false);
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
-  const [versionModalOpen, setVersionModalOpen] = useState(false);
 
   const reload = useCallback(async () => {
     try {
@@ -89,7 +95,6 @@ export function TeamDetailPage({ teamId, onBack }: TeamDetailPageProps) {
         onDelete={() => setDeleteOpen(true)}
         onSettings={() => setInfoOpen(true)}
         onMembers={() => setMembersOpen(true)}
-        onV2Click={() => setVersionModalOpen(true)}
       />
 
       <BoardContainer
@@ -102,6 +107,7 @@ export function TeamDetailPage({ teamId, onBack }: TeamDetailPageProps) {
         getTaskLight={getTaskLight}
         deleteTask={deleteTask}
         deleteTasksBulk={deleteTasksBulk}
+        addTaskComment={handleAddComment}
         onWorkspace={() => setWorkspaceOpen(true)}
       />
 
@@ -131,9 +137,6 @@ export function TeamDetailPage({ teamId, onBack }: TeamDetailPageProps) {
         teamId={teamId}
         scopes={scopes}
       />
-
-      {/* V2 version comparison modal */}
-      <TeamVersionModal open={versionModalOpen} onOpenChange={setVersionModalOpen} />
 
       {/* Delete confirmation */}
       <ConfirmDeleteDialog

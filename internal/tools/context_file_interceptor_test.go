@@ -45,6 +45,12 @@ func (s *stubAgentStore) DeleteUserContextFile(_ context.Context, _ uuid.UUID, _
 func (s *stubAgentStore) Create(_ context.Context, _ *store.AgentData) error              { return nil }
 func (s *stubAgentStore) GetByKey(_ context.Context, _ string) (*store.AgentData, error)  { return nil, nil }
 func (s *stubAgentStore) GetByID(_ context.Context, _ uuid.UUID) (*store.AgentData, error) { return nil, nil }
+func (s *stubAgentStore) GetByKeys(_ context.Context, _ []string) ([]store.AgentData, error) {
+	return nil, nil
+}
+func (s *stubAgentStore) GetByIDs(_ context.Context, _ []uuid.UUID) ([]store.AgentData, error) {
+	return nil, nil
+}
 func (s *stubAgentStore) GetDefault(_ context.Context) (*store.AgentData, error)            { return nil, nil }
 func (s *stubAgentStore) Update(_ context.Context, _ uuid.UUID, _ map[string]any) error   { return nil }
 func (s *stubAgentStore) Delete(_ context.Context, _ uuid.UUID) error                     { return nil }
@@ -68,21 +74,6 @@ func (s *stubAgentStore) SetUserOverride(_ context.Context, _ *store.UserAgentOv
 }
 func (s *stubAgentStore) GetOrCreateUserProfile(_ context.Context, _ uuid.UUID, _, _, _ string) (bool, string, error) {
 	return false, "", nil
-}
-func (s *stubAgentStore) IsGroupFileWriter(_ context.Context, _ uuid.UUID, _, _ string) (bool, error) {
-	return false, nil
-}
-func (s *stubAgentStore) AddGroupFileWriter(_ context.Context, _ uuid.UUID, _, _, _, _ string) error {
-	return nil
-}
-func (s *stubAgentStore) RemoveGroupFileWriter(_ context.Context, _ uuid.UUID, _, _ string) error {
-	return nil
-}
-func (s *stubAgentStore) ListGroupFileWriters(_ context.Context, _ uuid.UUID, _ string) ([]store.GroupFileWriterData, error) {
-	return nil, nil
-}
-func (s *stubAgentStore) ListGroupFileWriterGroups(_ context.Context, _ uuid.UUID) ([]store.GroupWriterGroupInfo, error) {
-	return nil, nil
 }
 func (s *stubAgentStore) ListUserInstances(_ context.Context, _ uuid.UUID) ([]store.UserInstanceData, error) {
 	return nil, nil

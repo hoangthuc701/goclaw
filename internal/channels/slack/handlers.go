@@ -12,6 +12,7 @@ import (
 	"github.com/slack-go/slack/socketmode"
 
 	"github.com/nextlevelbuilder/goclaw/internal/channels"
+	"github.com/nextlevelbuilder/goclaw/internal/store"
 )
 
 func (c *Channel) handleEventsAPI(evt socketmode.Event) {
@@ -32,6 +33,8 @@ func (c *Channel) handleEventsAPI(evt socketmode.Event) {
 }
 
 func (c *Channel) handleMessage(ev *slackevents.MessageEvent) {
+	ctx := context.Background()
+	ctx = store.WithTenantID(ctx, c.TenantID())
 	// For message_changed: extract user/text from the nested Message field.
 	// Only process if the edit introduces a new @bot mention.
 	if ev.SubType == "message_changed" {
@@ -89,11 +92,11 @@ func (c *Channel) handleMessage(ev *slackevents.MessageEvent) {
 
 	// Policy check
 	if isDM {
-		if !c.checkDMPolicy(senderID, channelID) {
+		if !c.checkDMPolicy(ctx, senderID, channelID) {
 			return
 		}
 	} else {
-		if !c.checkGroupPolicy(senderID, channelID) {
+		if !c.checkGroupPolicy(ctx, senderID, channelID) {
 			return
 		}
 	}
@@ -108,17 +111,41 @@ func (c *Channel) handleMessage(ev *slackevents.MessageEvent) {
 
 	// Process file attachments from Slack message
 	var mediaPaths []string
+	var allItems []mediaItem
 	if ev.Message != nil && len(ev.Message.Files) > 0 {
 		items, docContent := c.resolveMedia(ev.Message.Files)
+		allItems = append(allItems, items...)
 
-		for _, item := range items {
-			if item.FilePath != "" {
-				mediaPaths = append(mediaPaths, item.FilePath)
+		if docContent != "" {
+			if content != "" {
+				content = content + "\n\n" + docContent
+			} else {
+				content = docContent
 			}
 		}
+	}
 
-		// Prepend media tags and document content to message text
-		mediaTags := buildMediaTags(items)
+	// Fetch reply context + media from thread parent message.
+	// Only when replying in a thread (ThreadTimeStamp != TimeStamp).
+	threadTS := ev.ThreadTimeStamp
+	if threadTS != "" && threadTS != ev.TimeStamp {
+		replyCtx, replyItems := c.fetchThreadParentContext(context.Background(), channelID, threadTS)
+		if replyCtx != "" {
+			if content != "" {
+				content = replyCtx + "\n\n" + content
+			} else {
+				content = replyCtx
+			}
+		}
+		// Reply media first (context), current media second.
+		if len(replyItems) > 0 {
+			allItems = append(replyItems, allItems...)
+		}
+	}
+
+	// Build media tags and collect file paths from all items.
+	if len(allItems) > 0 {
+		mediaTags := buildMediaTags(allItems)
 		if mediaTags != "" {
 			if content != "" {
 				content = mediaTags + "\n\n" + content
@@ -126,11 +153,9 @@ func (c *Channel) handleMessage(ev *slackevents.MessageEvent) {
 				content = mediaTags
 			}
 		}
-		if docContent != "" {
-			if content != "" {
-				content = content + "\n\n" + docContent
-			} else {
-				content = docContent
+		for _, item := range allItems {
+			if item.FilePath != "" {
+				mediaPaths = append(mediaPaths, item.FilePath)
 			}
 		}
 	}
@@ -141,7 +166,6 @@ func (c *Channel) handleMessage(ev *slackevents.MessageEvent) {
 
 	// Determine local_key and thread context
 	localKey := channelID
-	threadTS := ev.ThreadTimeStamp
 	if !isDM && threadTS != "" {
 		localKey = fmt.Sprintf("%s:thread:%s", channelID, threadTS)
 	}
@@ -175,7 +199,7 @@ func (c *Channel) handleMessage(ev *slackevents.MessageEvent) {
 
 			// Collect contact even when bot is not mentioned (cache prevents DB spam).
 			if cc := c.ContactCollector(); cc != nil {
-				cc.EnsureContact(context.Background(), c.Type(), c.Name(), senderID, senderID, displayName, "", "group")
+				cc.EnsureContact(ctx, c.Type(), c.Name(), senderID, senderID, displayName, "", "group")
 			}
 
 			slog.Debug("slack group message recorded (no mention)",
@@ -255,4 +279,50 @@ func (c *Channel) handleMessage(ev *slackevents.MessageEvent) {
 		}
 		c.groupHistory.Clear(localKey)
 	}
+}
+
+// fetchThreadParentContext fetches the thread-start message and returns a formatted
+// reply context string + any downloaded media from the parent message.
+func (c *Channel) fetchThreadParentContext(ctx context.Context, channelID, threadTS string) (string, []mediaItem) {
+	params := &slackapi.GetConversationHistoryParameters{
+		ChannelID: channelID,
+		Latest:    threadTS,
+		Limit:     1,
+		Inclusive:  true,
+	}
+	history, err := c.api.GetConversationHistoryContext(ctx, params)
+	if err != nil || len(history.Messages) == 0 {
+		slog.Debug("slack: failed to fetch thread parent", "channel", channelID, "thread_ts", threadTS, "error", err)
+		return "", nil
+	}
+
+	parent := &history.Messages[0]
+
+	// Build reply context text.
+	var replyCtx string
+	if parent.Text != "" {
+		body := channels.Truncate(parent.Text, 500)
+		userName := c.resolveDisplayName(parent.User)
+		replyCtx = fmt.Sprintf("[Replying to %s]\n%s\n[/Replying]", userName, body)
+	}
+
+	// Download files from parent message.
+	var replyItems []mediaItem
+	if len(parent.Files) > 0 {
+		items, docContent := c.resolveMedia(parent.Files)
+		for i := range items {
+			items[i].FromReply = true
+		}
+		replyItems = items
+		// Append extracted document text to reply context.
+		if docContent != "" {
+			if replyCtx != "" {
+				replyCtx += "\n\n" + docContent
+			} else {
+				replyCtx = docContent
+			}
+		}
+	}
+
+	return replyCtx, replyItems
 }

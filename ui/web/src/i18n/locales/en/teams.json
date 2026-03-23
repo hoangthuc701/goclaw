@@ -116,7 +116,8 @@
       "followupCount": "Reminders sent: {{count}}",
       "followupCountMax": "Reminders sent: {{count}}/{{max}}",
       "followupNext": "Next reminder:",
-      "followupDone": "All reminders sent"
+      "followupDone": "All reminders sent",
+      "download": "Download"
     },
     "delete": "Delete",
     "deleteConfirm": "Delete this task? This cannot be undone.",
@@ -159,6 +160,27 @@
       "empty": "File is empty or binary"
     }
   },
+  "auditLogs": {
+    "title": "Audit Logs",
+    "empty": "No events yet",
+    "loadMore": "Load more",
+    "event": {
+      "created": "Created",
+      "claimed": "Claimed",
+      "assigned": "Assigned",
+      "dispatched": "Dispatched",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled",
+      "reviewed": "Reviewed",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "commented": "Commented",
+      "progress": "Progress",
+      "updated": "Updated",
+      "stale": "Stale"
+    }
+  },
   "settings": {
     "title": "Team Settings",
     "name": "Name",
@@ -189,6 +211,8 @@
     "notifyProgressHint": "Notify when a member updates task progress.",
     "notifyFailed": "Task failed",
     "notifyFailedHint": "Notify when a task fails.",
+    "notifySlowTool": "Slow tool alert",
+    "notifySlowToolHint": "System alert when a tool call takes abnormally long. Always direct — never through leader.",
     "notifyMode": "Delivery mode",
     "notifyModeHint": "How notifications are delivered to the chat channel.",
     "notifyModeDirect": "Direct",
@@ -196,11 +220,22 @@
     "notifyModeLeader": "Through Leader",
     "notifyModeLeaderDesc": "Leader agent reformulates updates naturally before sending to user.",
     "notifyModeLeaderWarning": "Leader mode uses AI to reformulate messages (costs tokens, may be slower).",
+    "notifyCompleted": "Notify when task completed",
+    "notifyCommented": "Notify when task commented",
+    "notifyNewTask": "Notify when new task created",
+    "memberRequests": "Member Requests",
+    "memberRequestsEnabled": "Allow member request tasks",
+    "memberRequestsEnabledDesc": "Members can create request tasks to ask for help from other teammates",
+    "memberRequestsAutoDispatch": "Auto-dispatch to assignee",
+    "memberRequestsAutoDispatchDesc": "Requests are dispatched immediately; otherwise they stay pending for leader review",
     "searchUsers": "Search users...",
     "selectChannel": "Select channel...",
     "escalationPolicy": "Escalation Policy",
     "escalationMode": "Escalation Mode",
     "escalationModeHint": "Controls how privileged workspace actions (pin, tag, delete others' files, set_template) are handled when requested by agents.",
+    "blockerEscalation": "Blocker Escalation",
+    "blockerEscalationEnabled": "Enable blocker escalation",
+    "blockerEscalationHint": "When members flag a blocker, the task auto-fails and the leader is notified to retry with updated instructions.",
     "escalationModeAuto": "Auto (default)",
     "escalationModeAutoDesc": "LLM lead evaluates the request — either rejects or creates a review task. Never executes directly.",
     "escalationModeReview": "Review",
@@ -230,7 +265,7 @@
     "versionAdvancedDesc": "All V1 features plus execution locking, follow-up reminders, review workflow, progress tracking, comments, audit trail, and auto-recovery.",
     "whatsNew": "What's different?",
     "versionModal": {
-      "title": "Team Versions",
+      "title": "Super Team Features",
       "feature": "Feature",
       "taskManagement": "Task Management",
       "taskManagementDesc": "Create, assign, complete, cancel tasks",
@@ -248,11 +283,11 @@
       "commentsAuditDesc": "Task comments and full event history",
       "autoRecovery": "Auto-Recovery",
       "autoRecoveryDesc": "Stuck tasks auto-reset after timeout",
-      "escalationPolicy": "Escalation Policy",
-      "escalationPolicyDesc": "Control what agents can do autonomously",
+      "escalationPolicy": "Blocker Escalation",
+      "escalationPolicyDesc": "Members can flag blockers — auto-fails task and notifies leader to retry",
       "comingSoon": "Coming soon",
       "downgradeNote": "Downgrade is safe — V2 data is preserved but hidden.",
-      "betaNote": "V2 is currently in Beta.",
+      "betaNote": "Some features are currently in Beta.",
       "gotIt": "Got it"
     }
   },
@@ -290,9 +325,17 @@
     "taskCreated": "Task created",
     "taskDeleted": "Task deleted",
     "taskAssigned": "Task assigned",
+    "taskApproved": "Task approved",
+    "taskRejected": "Task rejected",
+    "tasksBulkDeleted": "Tasks deleted",
     "failedCreateTask": "Failed to create task",
     "failedDeleteTask": "Failed to delete task",
-    "failedAssignTask": "Failed to assign task"
+    "failedAssignTask": "Failed to assign task",
+    "failedApproveTask": "Failed to approve task",
+    "failedRejectTask": "Failed to reject task",
+    "failedBulkDeleteTasks": "Failed to delete tasks",
+    "workspaceFileDeleted": "File deleted",
+    "failedDeleteWorkspaceFile": "Failed to delete file"
   },
   "board": {
     "kanban": "Board",

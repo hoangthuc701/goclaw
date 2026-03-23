@@ -80,6 +80,13 @@
     "deprecatedTooltip": "This tool has been deprecated and is no longer available",
     "settings": "Settings",
     "configuredVia": "Configured via the Config page",
+    "tenantOverride": "Tenant Override",
+    "tenantEnabled": "Enabled for this tenant",
+    "tenantDisabled": "Disabled for this tenant",
+    "tenantDefault": "Using default",
+    "resetToDefault": "Reset to default",
+    "unconfiguredWarning": "{{count}} tools need provider configuration for agents to use them at full capacity.",
+    "unconfiguredAction": "Configure",
     "categories": {
       "filesystem": "Filesystem",
       "runtime": "Runtime",
@@ -132,6 +139,21 @@
       "save": "Save",
       "saving": "Saving..."
     },
+    "extractorChain": {
+      "title": "Web Fetch — Extractor Chain",
+      "description": "Ordered list of content extractors. Each URL is tried top-to-bottom until one returns quality content.",
+      "timeout": "Timeout",
+      "baseUrl": "Base URL",
+      "save": "Save",
+      "saving": "Saving…",
+      "cancel": "Cancel",
+      "extractors": {
+        "defuddle": "Defuddle (Cloudflare Worker)",
+        "defuddleDesc": "Extracts clean markdown via fetch.goclaw.sh using the Defuddle library.",
+        "html-to-markdown": "Built-in HTML→Markdown",
+        "html-to-markdownDesc": "In-process DOM-based converter with hidden element detection."
+      }
+    },
     "mediaChain": {
       "providerChainSuffix": "— Provider Chain",
       "description": "Configure and order provider fallbacks. Drag to reorder — the first enabled provider is tried first.",
@@ -183,8 +205,7 @@
       "spawn": "Spawn a subagent to handle a task in the background",
       "skill_search": "Search for available skills by keyword or description to find relevant capabilities",
       "use_skill": "Activate a skill to use its specialized capabilities (tracing marker)",
-      "team_tasks": "View, create, update, and complete tasks on the team task board",
-      "team_message": "Send a direct message or broadcast to teammates in the agent team"
+      "team_tasks": "View, create, update, and complete tasks on the team task board"
     }
   }
 }

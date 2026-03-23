@@ -29,7 +29,7 @@ import (
 // registerConfigChannels registers config-based channels as fallback when no DB instances are loaded.
 func registerConfigChannels(cfg *config.Config, channelMgr *channels.Manager, msgBus *bus.MessageBus, pgStores *store.Stores, instanceLoader *channels.InstanceLoader) {
 	if cfg.Channels.Telegram.Enabled && cfg.Channels.Telegram.Token != "" && instanceLoader == nil {
-		tg, err := telegram.New(cfg.Channels.Telegram, msgBus, pgStores.Pairing, nil, nil, nil)
+		tg, err := telegram.New(cfg.Channels.Telegram, msgBus, pgStores.Pairing, nil, nil, nil, nil)
 		if err != nil {
 			slog.Error("failed to initialize telegram channel", "error", err)
 		} else {
@@ -39,7 +39,7 @@ func registerConfigChannels(cfg *config.Config, channelMgr *channels.Manager, ms
 	}
 
 	if cfg.Channels.Discord.Enabled && cfg.Channels.Discord.Token != "" && instanceLoader == nil {
-		dc, err := discord.New(cfg.Channels.Discord, msgBus, nil, nil)
+		dc, err := discord.New(cfg.Channels.Discord, msgBus, nil, nil, nil, nil)
 		if err != nil {
 			slog.Error("failed to initialize discord channel", "error", err)
 		} else {
@@ -143,7 +143,7 @@ func wireChannelEventSubscribers(
 			if !ok || payload.Kind != bus.CacheKindChannelInstances {
 				return
 			}
-			go instanceLoader.Reload(context.Background())
+			go instanceLoader.Reload(store.WithCrossTenant(context.Background()))
 		})
 	}
 
@@ -197,7 +197,7 @@ func wireChannelEventSubscribers(
 				if err != nil {
 					return
 				}
-				all, err := ciStore.ListAll(context.Background())
+				all, err := ciStore.ListAll(store.WithCrossTenant(context.Background()))
 				if err != nil {
 					slog.Warn("cascade disable: failed to list channel instances", "error", err)
 					return
@@ -205,7 +205,7 @@ func wireChannelEventSubscribers(
 				disabled := 0
 				for _, inst := range all {
 					if inst.AgentID == agentID && inst.Enabled {
-						if err := ciStore.Update(context.Background(), inst.ID, map[string]any{"enabled": false}); err != nil {
+						if err := ciStore.Update(store.WithCrossTenant(context.Background()), inst.ID, map[string]any{"enabled": false}); err != nil {
 							slog.Warn("cascade disable: failed to disable channel instance", "name", inst.Name, "error", err)
 						} else {
 							disabled++

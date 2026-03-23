@@ -161,29 +161,41 @@ flowchart TD
 | `retry` | Re-dispatch stale or failed tasks back to pending | Admin |
 | `update` | Update task metadata (priority, description, etc.) | Lead |
 
-### Team Versioning
-
-Many task actions require **team version >= 2**. Teams created with v1 only support basic actions.
-
-**V2-Required Actions:**
-- `approve` — Approve completed task
-- `reject` — Reject and cancel task
-- `review` — Submit for review
-- `comment` — Add comments
-- `progress` — Update progress
-- `attach` — Attach files
-- `update` — Update metadata
-- `ask_user` — Set reminders
-- `clear_ask_user` — Cancel reminders
-- `retry` — Retry failed tasks
-
-**V1 Teams** support only: `create`, `claim`, `complete`, `cancel`, `assign`, `list`, `get`, `search`
-
-If a v1 team tries a v2 action, error: `"action 'X' requires team version 2 — upgrade in team settings"`
-
 ### Atomic Claiming
 
 Two agents grabbing the same task is prevented at the database level. The claim operation uses a conditional update: `SET status = 'in_progress', owner = agent WHERE status = 'pending' AND owner IS NULL`. One row updated means claimed; zero rows means someone else got it first. No distributed mutex needed.
+
+### Blocker Escalation
+
+Members can flag themselves as blocked on a task by adding a blocker comment:
+
+```
+team_tasks(action="comment", task_id="...", text="Cannot find API documentation", type="blocker")
+```
+
+When a blocker comment is posted:
+1. The comment is saved with `comment_type='blocker'`
+2. The task is **auto-failed** (status: in_progress → failed)
+3. An `EventTeamTaskFailed` is broadcast:
+   - Member's session is cancelled via scheduler
+   - Chat channel receives "❌ Task failed" notification
+   - Web UI dashboard updates in real-time
+4. The **lead agent receives an escalation message** from `system:escalation` with:
+   - Blocked member name
+   - Task number and subject
+   - Blocker reason
+   - Instructions to retry with `team_tasks(action="retry", task_id="...")`
+
+Blocker escalation is **enabled by default** but can be disabled per-team via settings:
+```json
+{
+  "blocker_escalation": {
+    "enabled": false
+  }
+}
+```
+
+When disabled, blocker comments are saved but do not trigger auto-fail or escalation.
 
 ### Task Dependencies & Blocking
 
@@ -232,16 +244,7 @@ The board displays these snapshots in a visual timeline, allowing users to revie
 
 ### Delegate Agent Restrictions
 
-Delegate agents (members executing delegated work) have restrictions to prevent lifecycle corruption:
-
-- **Cannot complete directly**: Results are auto-completed when delegation finishes
-  - Error: `"delegate agents cannot complete team tasks directly — results are auto-completed when delegation finishes"`
-- **Cannot cancel tasks**: Only the lead can cancel
-  - Error: `"delegate agents cannot cancel team tasks directly"`
-- **Cannot approve/reject**: Only lead and dashboard users can approve/reject
-  - Error: `"delegate agents cannot reject team tasks"` (for reject)
-
-This ensures task state transitions are controlled and audit-trail integrity is maintained.
+Guards that previously prevented delegate agents from directly completing, cancelling, or approving/rejecting tasks are currently commented out (reserved for a future reviewer workflow). At this time, these restrictions are not enforced at runtime. A future implementation may re-enable them when a structured reviewer/approval flow is introduced.
 
 ### Assignee is Mandatory
 
@@ -249,8 +252,8 @@ When creating a task via `team_tasks(action="create")`, the `assignee` field is 
 
 ### Concurrent Creation Guard
 
-Agents must list existing tasks before creating new ones. This prevents duplicate task creation in concurrent sessions. When an agent calls `create` without first checking the board:
-- Error: `"You must check existing tasks first. Call team_tasks(action='list') to review the current task board before creating new tasks — this prevents duplicates in concurrent sessions."`
+Agents must check existing tasks before creating new ones. This prevents duplicate task creation in concurrent sessions. The preferred method is `team_tasks(action="search", query="<keywords>")` which uses semantic + keyword matching and saves tokens vs listing all. Alternatively `action="list"` shows the full board. When an agent calls `create` without first checking:
+- Error: `"You must check existing tasks first. Call team_tasks(action='search', query='<keywords>') to check for similar tasks before creating — this saves tokens vs listing all."`
 
 ### Auto-Claiming Behavior
 
@@ -264,7 +267,7 @@ This is safe because the claim is atomic — only one agent can succeed.
 
 ### User & Channel Scoping
 
-- **System/delegate channels**: See all tasks for the team
+- **System/teammate channels**: See all tasks for the team
 - **Regular user channels**: Filter to tasks they triggered (filtered by user ID)
 - **Scope discovery**: `teams.scopes` lists all unique channel+chatID scopes across tasks
 - **Known users**: `teams.known_users` lists distinct user IDs from team member sessions (UI user select)
@@ -298,6 +301,30 @@ Workspace files can be attached to tasks:
 - Auto-links files created during task execution
 - Metadata captures which agent/user attached the file
 
+### Review Workflow
+
+Tasks can require human approval before final completion. When creating a task, pass `require_approval: true`:
+
+```
+team_tasks(action="create", ..., require_approval=true)
+```
+
+**Flow:**
+
+1. **Create with approval flag**: Task created with status `pending`, `require_approval` set
+2. **Member submits for review**: When done, member calls `team_tasks(action="review", task_id="...")`
+   - Task transitions to `in_review` status
+   - Emits `EventTeamTaskReviewed` event
+3. **Human approves**: Via dashboard, human clicks "Approve" → `teams.tasks.approve` RPC
+   - Task transitions to `completed`
+   - Emits `EventTeamTaskApproved` event
+4. **Human rejects**: Via dashboard, human clicks "Reject" with reason → `teams.tasks.reject` RPC
+   - Task transitions to `cancelled` with reason
+   - Emits `EventTeamTaskRejected` event
+   - Lead receives notification to retry or investigate
+
+Without `require_approval`, tasks move directly to `completed` after member calls `complete` (no in-review stage).
+
 ---
 
 ## 5. Team Mailbox
@@ -318,7 +345,7 @@ When a team message is sent, it flows through the message bus with a `"teammate:
 [Team message from {sender_key}]: {message text}
 ```
 
-The receiving agent processes this as an inbound message, routed through the delegate scheduler lane. The response is published back to the originating channel so the user (and lead) can see it.
+The receiving agent processes this as an inbound message, routed through the team scheduler lane. The response is published back to the originating channel so the user (and lead) can see it.
 
 ### Use Cases
 
@@ -388,7 +415,7 @@ flowchart TD
     LEAD["Lead receives user request"] --> CREATE["1. Create task on board<br/>team_tasks action=create<br/>→ returns task_id"]
     CREATE --> SPAWN["2. Delegate to member<br/>spawn agent=member,<br/>team_task_id=task_id"]
     SPAWN --> INJECT["Inject team workspace context<br/>WithToolTeamID<br/>WithToolTeamWorkspace<br/>WithTeamTaskID"]
-    INJECT --> LANE["Scheduled through<br/>delegate lane"]
+    INJECT --> LANE["Scheduled through<br/>team lane"]
     LANE --> MEMBER["Member agent executes<br/>in isolated session<br/>with workspace access"]
     MEMBER --> COMPLETE["3. Task auto-completed<br/>with delegation result"]
     COMPLETE --> DISPATCH["Files auto-linked to task<br/>Comments/events recorded"]
@@ -427,7 +454,7 @@ When a delegation finishes (success or failure):
 
 When the lead delegates to multiple members simultaneously:
 
-- Each delegation runs independently in the delegate lane
+- Each delegation runs independently in the team lane
 - Intermediate completions accumulate their results (artifacts)
 - When the **last** sibling delegation finishes, all accumulated results are collected
 - A single combined announcement is delivered to the lead with all results
@@ -496,8 +523,8 @@ Team messages flow through the message bus with specific routing rules.
 ```mermaid
 flowchart TD
     subgraph "Inbound (Team Member Execution)"
-        LEAD_SPAWN["Lead: spawn agent=member,<br/>team_task_id=X"] --> BUS_IN["Message Bus<br/>SenderID: 'delegate:{id}'"]
-        BUS_IN --> CONSUMER["Consumer routes to<br/>delegate lane"]
+        LEAD_SPAWN["Lead: spawn agent=member,<br/>team_task_id=X"] --> BUS_IN["Message Bus<br/>SenderID: 'delegate:{id}' (legacy format)"]
+        BUS_IN --> CONSUMER["Consumer routes to<br/>team lane"]
         CONSUMER --> MEMBER["Member agent runs<br/>in isolated session"]
     end
 
@@ -506,7 +533,7 @@ flowchart TD
         RESULT --> CHECK{"Last sibling?"}
         CHECK -->|"No"| ACCUMULATE["Accumulate artifacts"]
         CHECK -->|"Yes"| COLLECT["Collect all artifacts"]
-        COLLECT --> ANNOUNCE["Publish to parent session<br/>SenderID: 'delegate:{id}'"]
+        COLLECT --> ANNOUNCE["Publish to parent session<br/>SenderID: 'delegate:{id}' (legacy format)"]
         ANNOUNCE --> LEAD_SESSION["Lead processes in<br/>original user session"]
     end
 
@@ -521,8 +548,8 @@ flowchart TD
 
 | Prefix | Source | Destination | Scheduler Lane |
 |--------|--------|-------------|----------------|
-| `delegate:` | Delegation completion | Parent agent's original session | delegate |
-| `teammate:` | Team mailbox message | Target agent's session | delegate |
+| `delegate:` | Delegation completion (legacy session key format) | Parent agent's original session | team |
+| `teammate:` | Team mailbox message | Target agent's session | team |
 
 ### Session Context Preservation
 
@@ -555,8 +582,9 @@ Teams support fine-grained access control through team settings.
 | `followup_max_reminders` | Integer | Max ask_user reminders before escalation |
 | `escalation_mode` | String | How to escalate stale tasks: "notify_lead", "fail_task" |
 | `escalation_actions` | String list | Actions to take on escalation |
+| `blocker_escalation` | Object | Blocker comment escalation settings: `{enabled: true}` (default enabled) |
 
-System channels (`delegate`, `system`) always pass access checks. Empty settings mean open access.
+System channels (`teammate`, `system`) always pass access checks. Empty settings mean open access.
 
 ### Link-Level Settings
 
@@ -652,7 +680,7 @@ Teams emit events for real-time UI updates and observability.
 | `internal/store/team_store.go` | TeamStore interface (~40 methods), data types: TeamData, TeamTaskData, TeamMessageData, TeamTaskCommentData, etc. |
 | `internal/store/pg/teams.go` | PostgreSQL implementation: teams CRUD, members, tasks, messages, events, attachments |
 | `cmd/gateway_managed.go` | Team tool wiring, cache invalidation subscription |
-| `cmd/gateway_consumer.go` | Message routing for delegate/teammate prefixes, task dispatch to agents |
+| `cmd/gateway_consumer.go` | Message routing for teammate/delegate (legacy) prefixes, task dispatch to agents |
 
 ---
 

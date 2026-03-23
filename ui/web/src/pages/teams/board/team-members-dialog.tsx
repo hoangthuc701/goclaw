@@ -8,7 +8,6 @@ import { Combobox } from "@/components/ui/combobox";
 import { Bot, UserPlus, X, Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useAgents } from "@/pages/agents/hooks/use-agents";
-import { toast } from "@/stores/use-toast-store";
 import type { TeamMemberData } from "@/types/team";
 
 interface TeamMembersDialogProps {
@@ -21,7 +20,7 @@ interface TeamMembersDialogProps {
 
 const ROLE_COLORS: Record<string, string> = {
   lead: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
-  reviewer: "bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30",
+  reviewer: "bg-orange-500/10 text-orange-700 dark:text-orange-400 border-orange-500/30",
   member: "bg-muted text-muted-foreground",
 };
 
@@ -77,9 +76,8 @@ export function TeamMembersDialog({
       await onAddMember(selected, "member");
       setSelected("");
       setShowAdd(false);
-      toast.success(t("members.added"));
     } catch {
-      toast.error(t("members.failedAdd"));
+      // toast handled by hook
     } finally {
       setAdding(false);
     }
@@ -89,9 +87,8 @@ export function TeamMembersDialog({
     setRemoving(agentId);
     try {
       await onRemoveMember(agentId);
-      toast.success(t("members.removed"));
     } catch {
-      toast.error(t("members.failedRemove"));
+      // toast handled by hook
     } finally {
       setRemoving(null);
     }

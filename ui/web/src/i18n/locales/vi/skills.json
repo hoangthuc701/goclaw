@@ -102,5 +102,14 @@
     "version": "Phiên bản:",
     "current": "(hiện tại)",
     "noContent": "Không có nội dung."
+  },
+  "toast": {
+    "updated": "Đã cập nhật skill",
+    "updateFailed": "Không thể cập nhật skill",
+    "deleted": "Đã xóa skill",
+    "deleteFailed": "Không thể xóa skill",
+    "rescanUpdated": "Đã cập nhật {{count}} skill",
+    "rescanNoChanges": "Tất cả skill đã cập nhật",
+    "rescanFailed": "Không thể quét lại dependencies"
   }
 }

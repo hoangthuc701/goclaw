@@ -17,7 +17,7 @@ import {
   sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { GripVertical, Trash2, ChevronDown, ChevronUp, Plus } from "lucide-react";
+import { GripVertical, Trash2, ChevronDown, ChevronUp, Plus, Loader2 } from "lucide-react";
 import { uniqueId } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -76,35 +76,52 @@ function parseInitialEntries(
   providers: ReturnType<typeof useProviders>["providers"],
 ): ProviderEntry[] {
   // New format: { providers: [...] }
+  // Only include entries whose provider exists in the current tenant.
   if (Array.isArray(settings.providers)) {
-    return (settings.providers as Record<string, unknown>[]).map((p) => ({
-      id: uniqueId(),
-      provider_id: String(p.provider_id ?? ""),
-      provider: String(p.provider ?? ""),
-      model: String(p.model ?? ""),
-      enabled: Boolean(p.enabled ?? true),
-      timeout: Number(p.timeout ?? 120),
-      max_retries: Number(p.max_retries ?? 2),
-      params: (p.params as Record<string, unknown>) ?? {},
-    }));
+    return (settings.providers as Record<string, unknown>[])
+      .map((p) => {
+        const name = String(p.provider ?? "");
+        const pid = String(p.provider_id ?? "");
+        // Resolve provider_id: use stored id if valid, otherwise look up by name
+        const resolved = (pid && providers.some((pr) => pr.id === pid))
+          ? pid
+          : providers.find((pr) => pr.name === name)?.id ?? "";
+        // Skip entries whose provider doesn't exist in this tenant
+        if (!resolved) return null;
+        return {
+          id: uniqueId(),
+          provider_id: resolved,
+          provider: name,
+          model: String(p.model ?? ""),
+          enabled: Boolean(p.enabled ?? true),
+          timeout: Number(p.timeout ?? 120),
+          max_retries: Number(p.max_retries ?? 2),
+          params: (p.params as Record<string, unknown>) ?? {},
+        };
+      })
+      .filter((e): e is ProviderEntry => e !== null);
   }
 
   // Legacy format: { provider, model }
+  // Only show if the provider exists in the current tenant's provider list.
   if (settings.provider || settings.model) {
     const providerName = String(settings.provider ?? "");
     const providerData = providers.find((p) => p.name === providerName);
-    return [
-      {
-        id: uniqueId(),
-        provider_id: providerData?.id ?? "",
-        provider: providerName,
-        model: String(settings.model ?? ""),
-        enabled: true,
-        timeout: 120,
-        max_retries: 2,
-        params: {},
-      },
-    ];
+    if (providerData) {
+      return [
+        {
+          id: uniqueId(),
+          provider_id: providerData.id,
+          provider: providerName,
+          model: String(settings.model ?? ""),
+          enabled: true,
+          timeout: 120,
+          max_retries: 2,
+          params: {},
+        },
+      ];
+    }
+    // Provider not available in this tenant — show empty chain
   }
 
   return [];
@@ -415,6 +432,8 @@ export function MediaProviderChainForm({
     try {
       const serialized = entries.map(({ id: _id, ...rest }) => rest);
       await onSave({ providers: serialized });
+    } catch {
+      // toast shown by hook
     } finally {
       setSaving(false);
     }
@@ -464,6 +483,7 @@ export function MediaProviderChainForm({
           {t("builtin.mediaChain.cancel")}
         </Button>
         <Button onClick={handleSave} disabled={saving}>
+          {saving && <Loader2 className="h-4 w-4 animate-spin" />}
           {saving ? t("builtin.mediaChain.saving") : t("builtin.mediaChain.save")}
         </Button>
       </DialogFooter>

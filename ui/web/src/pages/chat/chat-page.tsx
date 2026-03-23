@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useNavigate } from "react-router";
 import { Eye, PanelLeftOpen } from "lucide-react";
@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 import { ChatSidebar } from "./chat-sidebar";
 import { ChatThread } from "./chat-thread";
 import { ChatInput, type AttachedFile } from "@/components/chat/chat-input";
+import { ChatTopBar } from "@/components/chat/chat-top-bar";
+import { DropZone } from "@/components/chat/drop-zone";
 import { useChatSessions } from "./hooks/use-chat-sessions";
 import { useChatMessages } from "./hooks/use-chat-messages";
 import { useChatSend } from "./hooks/use-chat-send";
@@ -22,21 +24,29 @@ export function ChatPage() {
   const userId = useAuthStore((s) => s.userId);
 
   const [scrollTrigger, setScrollTrigger] = useState(0);
+  const [files, setFiles] = useState<AttachedFile[]>([]);
 
-  const [agentId, setAgentId] = useState(() => {
+  // sessionKey derived from URL — single source of truth, no separate state
+  const sessionKey = urlSessionKey ?? "";
+
+  // Fallback agent ID used only when URL has no session key
+  const [agentIdFallback, setAgentIdFallback] = useState("default");
+
+  // Derive agentId from URL (source of truth), fallback to state when no session
+  const agentId = useMemo(() => {
     if (urlSessionKey) {
       const { agentId: parsed } = parseSessionKey(urlSessionKey);
       if (parsed) return parsed;
     }
-    return "default";
-  });
-  const [sessionKey, setSessionKey] = useState(urlSessionKey ?? "");
+    return agentIdFallback;
+  }, [urlSessionKey, agentIdFallback]);
 
   const {
     sessions,
     loading: sessionsLoading,
     refresh: refreshSessions,
     buildNewSessionKey,
+    deleteSession,
   } = useChatSessions(agentId);
 
   const {
@@ -45,26 +55,23 @@ export function ChatPage() {
     thinkingText,
     toolStream,
     isRunning,
+    isBusy,
     loading: messagesLoading,
+    activity,
+    blockReplies,
+    teamTasks,
     expectRun,
     addLocalMessage,
   } = useChatMessages(sessionKey, agentId);
 
-  // Sync URL param to state
+  // Refresh sessions when all work completes (main agent + team tasks)
+  const prevIsBusyRef = useRef(false);
   useEffect(() => {
-    if (urlSessionKey && urlSessionKey !== sessionKey) {
-      setSessionKey(urlSessionKey);
-    }
-  }, [urlSessionKey, sessionKey]);
-
-  // Refresh sessions when run completes
-  const prevIsRunningRef = useRef(false);
-  useEffect(() => {
-    if (prevIsRunningRef.current && !isRunning) {
+    if (prevIsBusyRef.current && !isBusy) {
       refreshSessions();
     }
-    prevIsRunningRef.current = isRunning;
-  }, [isRunning, refreshSessions]);
+    prevIsBusyRef.current = isBusy;
+  }, [isBusy, refreshSessions]);
 
   const isOwn = !sessionKey || isOwnSession(sessionKey, userId);
 
@@ -82,48 +89,56 @@ export function ChatPage() {
   });
 
   const handleNewChat = useCallback(() => {
-    const newKey = buildNewSessionKey();
-    setSessionKey(newKey);
-    navigate(`/chat/${encodeURIComponent(newKey)}`);
+    navigate(`/chat/${encodeURIComponent(buildNewSessionKey())}`);
   }, [buildNewSessionKey, navigate]);
 
   const handleSessionSelect = useCallback(
     (key: string) => {
-      // Sync agentId from session key to ensure correct routing
       const { agentId: parsed } = parseSessionKey(key);
-      if (parsed && parsed !== agentId) {
-        setAgentId(parsed);
-      }
-      setSessionKey(key);
+      if (parsed) setAgentIdFallback(parsed);
       navigate(`/chat/${encodeURIComponent(key)}`);
     },
-    [navigate, agentId],
+    [navigate],
   );
+
+  const handleDeleteSession = useCallback(async (key: string) => {
+    await deleteSession(key);
+    if (key === sessionKey) {
+      const next = sessions.find((s) => s.key !== key);
+      if (next) {
+        handleSessionSelect(next.key);
+      } else {
+        handleNewChat();
+      }
+    }
+  }, [deleteSession, sessionKey, sessions, handleSessionSelect, handleNewChat]);
 
   const handleAgentChange = useCallback(
     (newAgentId: string) => {
-      setAgentId(newAgentId);
-      const newKey = `agent:${newAgentId}:ws-${userId}-${Date.now().toString(36)}`;
-      setSessionKey(newKey);
-      navigate(`/chat/${encodeURIComponent(newKey)}`);
+      setAgentIdFallback(newAgentId);
+      if (sessionKey) {
+        navigate("/chat");
+      }
     },
-    [navigate, userId],
+    [navigate, sessionKey],
   );
 
   const handleSend = useCallback(
-    (message: string, files?: AttachedFile[]) => {
+    (message: string, sendFiles?: AttachedFile[]) => {
       let key = sessionKey;
       if (!key) {
         key = buildNewSessionKey();
-        setSessionKey(key);
-        navigate(`/chat/${encodeURIComponent(key)}`);
+        navigate(`/chat/${encodeURIComponent(key)}`, { replace: true });
       }
-      // Pass key directly so send() doesn't use a stale closure value
-      send(message, key, files);
+      send(message, key, sendFiles);
       setScrollTrigger((n) => n + 1);
     },
     [sessionKey, send, buildNewSessionKey, navigate],
   );
+
+  const handleDropFiles = useCallback((dropped: File[]) => {
+    setFiles((prev) => [...prev, ...dropped.map((f) => ({ file: f }))]);
+  }, []);
 
   const handleAbort = useCallback(() => {
     abort(sessionKey);
@@ -147,7 +162,7 @@ export function ChatPage() {
   }, [handleNewChat]);
 
   return (
-    <div className="relative flex h-full">
+    <div className="relative flex h-full overflow-hidden">
       {/* Chat Sidebar */}
       {isMobile ? (
         <>
@@ -170,6 +185,7 @@ export function ChatPage() {
               sessionsLoading={sessionsLoading}
               activeSessionKey={sessionKey}
               onSessionSelect={handleSessionSelectMobile}
+              onDeleteSession={handleDeleteSession}
               onNewChat={handleNewChatMobile}
             />
           </div>
@@ -182,14 +198,15 @@ export function ChatPage() {
           sessionsLoading={sessionsLoading}
           activeSessionKey={sessionKey}
           onSessionSelect={handleSessionSelect}
+          onDeleteSession={handleDeleteSession}
           onNewChat={handleNewChat}
         />
       )}
 
       {/* Main chat area */}
-      <div className="flex flex-1 flex-col">
+      <div className="flex flex-1 min-h-0 flex-col">
         {isMobile && (
-          <div className="flex items-center border-b px-3 py-2 landscape-compact">
+          <div className="flex shrink-0 items-center border-b px-3 py-2 landscape-compact">
             <button
               onClick={() => setChatSidebarOpen(true)}
               className="rounded-md p-1.5 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
@@ -200,35 +217,47 @@ export function ChatPage() {
           </div>
         )}
 
+        <div className="shrink-0">
+          <ChatTopBar agentId={agentId} isRunning={isRunning} isBusy={isBusy} activity={activity} teamTasks={teamTasks} />
+        </div>
+
         {sendError && (
-          <div className="border-b bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          <div className="shrink-0 border-b bg-destructive/10 px-4 py-2 text-sm text-destructive">
             {sendError}
           </div>
         )}
 
-        <ChatThread
-          messages={messages}
-          streamText={streamText}
-          thinkingText={thinkingText}
-          toolStream={toolStream}
-          isRunning={isRunning}
-          loading={messagesLoading}
-          scrollTrigger={scrollTrigger}
-        />
-
-        {isOwn ? (
-          <ChatInput
-            onSend={handleSend}
-            onAbort={handleAbort}
+        <DropZone onDrop={handleDropFiles}>
+          <ChatThread
+            messages={messages}
+            streamText={streamText}
+            thinkingText={thinkingText}
+            toolStream={toolStream}
+            blockReplies={blockReplies}
+            activity={activity}
+            teamTasks={teamTasks}
             isRunning={isRunning}
-            disabled={!connected}
+            isBusy={isBusy}
+            loading={messagesLoading}
+            scrollTrigger={scrollTrigger}
           />
-        ) : (
-          <div className="flex items-center gap-2 border-t bg-muted/50 px-4 py-3 text-sm text-muted-foreground">
-            <Eye className="h-4 w-4" />
-            {t("readOnly")}
-          </div>
-        )}
+
+          {isOwn ? (
+            <ChatInput
+              onSend={handleSend}
+              onAbort={handleAbort}
+              isBusy={isBusy}
+              disabled={!connected}
+              files={files}
+              onFilesChange={setFiles}
+            />
+          ) : (
+            <div className="mx-3 mb-3 flex items-center gap-2 rounded-xl border bg-muted/50 px-4 py-3 text-sm text-muted-foreground shadow-sm">
+              <Eye className="h-4 w-4" />
+              {t("readOnly")}
+            </div>
+          )}
+        </DropZone>
       </div>
     </div>
   );

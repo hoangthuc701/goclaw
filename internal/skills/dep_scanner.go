@@ -1,6 +1,7 @@
 package skills
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,6 +35,7 @@ func scanScriptsDir(scriptsDir string) *SkillManifest {
 
 	entries, err := os.ReadDir(scriptsDir)
 	if err != nil {
+		slog.Debug("dep_scanner: scripts dir not found", "dir", scriptsDir, "error", err)
 		return m
 	}
 
@@ -42,6 +44,8 @@ func scanScriptsDir(scriptsDir string) *SkillManifest {
 	binaries := make(map[string]bool)
 	// Track subdirectory names — these are local modules and must never be reported as missing.
 	localModules := make(map[string]bool)
+	// The scripts directory itself can be referenced as a module (e.g. "from scripts import utils").
+	localModules[filepath.Base(scriptsDir)] = true
 
 	for _, e := range entries {
 		if e.IsDir() {
@@ -53,11 +57,29 @@ func scanScriptsDir(scriptsDir string) *SkillManifest {
 			}
 			for _, se := range subEntries {
 				if se.IsDir() {
+					// Track nested subdirs as local modules too (e.g. office/helpers, office/validators)
+					// so intra-package imports like "from helpers import ..." don't get falsely reported.
+					localModules[se.Name()] = true
+					// Scan files inside nested subdirs
+					nestedEntries, err := os.ReadDir(filepath.Join(scriptsDir, e.Name(), se.Name()))
+					if err != nil {
+						continue
+					}
+					for _, ne := range nestedEntries {
+						if !ne.IsDir() {
+							scanFile(filepath.Join(scriptsDir, e.Name(), se.Name(), ne.Name()), pyImports, nodeImports, binaries)
+						}
+					}
 					continue
 				}
 				scanFile(filepath.Join(scriptsDir, e.Name(), se.Name()), pyImports, nodeImports, binaries)
 			}
 			continue
+		}
+		// Track sibling .py files as local modules so cross-file imports
+		// (e.g. "from extract_form_field_info import ...") are not reported as pip deps.
+		if strings.HasSuffix(e.Name(), ".py") {
+			localModules[strings.TrimSuffix(e.Name(), ".py")] = true
 		}
 		scanFile(filepath.Join(scriptsDir, e.Name()), pyImports, nodeImports, binaries)
 	}
@@ -82,6 +104,11 @@ func scanScriptsDir(scriptsDir string) *SkillManifest {
 	}
 	if len(nodeImports) > 0 && !binaries["node"] {
 		m.Requires = append(m.Requires, "node")
+	}
+
+	if !m.IsEmpty() {
+		slog.Debug("dep_scanner: scanned", "dir", scriptsDir,
+			"bins", len(m.Requires), "py", len(m.RequiresPython), "node", len(m.RequiresNode))
 	}
 
 	return m

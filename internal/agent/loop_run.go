@@ -29,6 +29,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 		event.UserID = req.UserID
 		event.Channel = req.Channel
 		event.ChatID = req.ChatID
+		event.TenantID = store.TenantIDFromContext(ctx)
 		l.emit(event)
 	}
 
@@ -160,7 +161,7 @@ func (l *Loop) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 			traceCtx := ctx
 			traceStatus := store.TraceStatusError
 			if ctx.Err() != nil {
-				traceCtx = context.Background()
+				traceCtx = context.WithoutCancel(ctx)
 				traceStatus = store.TraceStatusCancelled
 			}
 			l.traceCollector.FinishTrace(traceCtx, traceID, traceStatus, err.Error(), "")
@@ -177,6 +178,9 @@ func (l *Loop) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 			"cache_creation_tokens": result.Usage.CacheCreationTokens,
 			"cache_read_tokens":     result.Usage.CacheReadTokens,
 		}
+	}
+	if len(result.Media) > 0 {
+		completedPayload["media"] = result.Media
 	}
 	emitRun(AgentEvent{
 		Type:    protocol.AgentEventRunCompleted,

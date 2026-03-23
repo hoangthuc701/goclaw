@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 
 	"github.com/google/uuid"
@@ -34,7 +35,7 @@ const (
 const (
 	ChannelSystem    = "system"
 	ChannelDashboard = "dashboard"
-	ChannelDelegate  = "delegate"
+	ChannelTeammate  = "teammate"
 )
 
 // MediaPathLoader resolves a media ID to a local file path.
@@ -173,10 +174,9 @@ func RestrictFromCtx(ctx context.Context) (bool, bool) {
 }
 
 func effectiveRestrict(ctx context.Context, toolDefault bool) bool {
-	if v, ok := RestrictFromCtx(ctx); ok {
-		return v
-	}
-	return toolDefault
+	// Multi-tenant security: always restrict agents to their workspace.
+	// Agents must not access files outside their tenant-scoped workspace.
+	return true
 }
 
 // --- Parent agent model (for subagent inheritance) ---
@@ -191,6 +191,21 @@ func WithParentModel(ctx context.Context, model string) context.Context {
 // ParentModelFromCtx returns the parent agent's model from context.
 func ParentModelFromCtx(ctx context.Context) string {
 	v, _ := ctx.Value(ctxParentModel).(string)
+	return v
+}
+
+// --- Parent agent provider (for subagent inheritance) ---
+
+const ctxParentProvider toolContextKey = "tool_parent_provider"
+
+// WithParentProvider sets the parent agent's provider name in context so subagents inherit it.
+func WithParentProvider(ctx context.Context, providerName string) context.Context {
+	return context.WithValue(ctx, ctxParentProvider, providerName)
+}
+
+// ParentProviderFromCtx returns the parent agent's provider name from context.
+func ParentProviderFromCtx(ctx context.Context) string {
+	v, _ := ctx.Value(ctxParentProvider).(string)
 	return v
 }
 
@@ -225,7 +240,7 @@ func MemoryConfigFromCtx(ctx context.Context) *config.MemoryConfig {
 const ctxTeamID toolContextKey = "tool_team_id"
 
 // WithToolTeamID injects the dispatching team's ID into context so team
-// tools (team_tasks, team_message) and the WorkspaceInterceptor resolve
+// tools (team_tasks) and the WorkspaceInterceptor resolve
 // the correct team when the agent belongs to multiple teams.
 func WithToolTeamID(ctx context.Context, teamID string) context.Context {
 	return context.WithValue(ctx, ctxTeamID, teamID)
@@ -366,6 +381,79 @@ func WithPendingTeamDispatch(ctx context.Context, ptd *PendingTeamDispatch) cont
 func PendingTeamDispatchFromCtx(ctx context.Context) *PendingTeamDispatch {
 	v, _ := ctx.Value(ctxPendingDispatch).(*PendingTeamDispatch)
 	return v
+}
+
+// InjectTeamDispatch creates a fresh PendingTeamDispatch context for a direct
+// loop.Run() call (WS chat.send, HTTP API, etc.) and returns a drain function
+// that must be called after the run completes. The drain function dispatches
+// any pending team tasks via the provided PostTurnProcessor. It is safe to
+// call even if no tasks were created. Pass nil postTurn if not available.
+func InjectTeamDispatch(ctx context.Context, postTurn PostTurnProcessor) (context.Context, func()) {
+	ptd := NewPendingTeamDispatch()
+	ctx = WithPendingTeamDispatch(ctx, ptd)
+	// Detach from caller's cancel/deadline but keep values (tenant_id, user_id, etc.)
+	// so post-turn dispatch isn't aborted when the HTTP request or WS handler returns.
+	detached := context.WithoutCancel(ctx)
+	drain := func() {
+		ptd.ReleaseTeamLock()
+		if postTurn != nil {
+			for teamID, taskIDs := range ptd.Drain() {
+				if err := postTurn.ProcessPendingTasks(detached, teamID, taskIDs); err != nil {
+					slog.Warn("post_turn: dispatch failed", "team_id", teamID, "error", err)
+				}
+			}
+		}
+	}
+	return ctx, drain
+}
+
+// --- Run media file paths (for team workspace auto-collect) ---
+
+const ctxRunMediaPaths toolContextKey = "tool_run_media_paths"
+
+// WithRunMediaPaths stores the absolute file paths of media files received
+// in the current run. Used by team_tasks to auto-copy files to team workspace.
+func WithRunMediaPaths(ctx context.Context, paths []string) context.Context {
+	return context.WithValue(ctx, ctxRunMediaPaths, paths)
+}
+
+// RunMediaPathsFromCtx returns media file paths from the current run.
+func RunMediaPathsFromCtx(ctx context.Context) []string {
+	v, _ := ctx.Value(ctxRunMediaPaths).([]string)
+	return v
+}
+
+const ctxRunMediaNames toolContextKey = "tool_run_media_names"
+
+// WithRunMediaNames stores the mapping from media file path to original filename.
+func WithRunMediaNames(ctx context.Context, names map[string]string) context.Context {
+	return context.WithValue(ctx, ctxRunMediaNames, names)
+}
+
+// RunMediaNamesFromCtx returns the media path → original filename mapping.
+func RunMediaNamesFromCtx(ctx context.Context) map[string]string {
+	v, _ := ctx.Value(ctxRunMediaNames).(map[string]string)
+	return v
+}
+
+// --- Iteration progress (loop → tools) ---
+
+const ctxIterProgress toolContextKey = "tool_iter_progress"
+
+// IterationProgress carries the agent loop's current iteration state
+// so tools can adapt behaviour (e.g. reduce output size) as the budget shrinks.
+type IterationProgress struct {
+	Current int
+	Max     int
+}
+
+func WithIterationProgress(ctx context.Context, p IterationProgress) context.Context {
+	return context.WithValue(ctx, ctxIterProgress, p)
+}
+
+func IterationProgressFromCtx(ctx context.Context) (IterationProgress, bool) {
+	v, ok := ctx.Value(ctxIterProgress).(IterationProgress)
+	return v, ok
 }
 
 // --- Per-agent sandbox config override ---

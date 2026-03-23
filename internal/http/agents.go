@@ -11,6 +11,7 @@ import (
 
 	"github.com/nextlevelbuilder/goclaw/internal/bootstrap"
 	"github.com/nextlevelbuilder/goclaw/internal/bus"
+	"github.com/nextlevelbuilder/goclaw/internal/config"
 	"github.com/nextlevelbuilder/goclaw/internal/i18n"
 	"github.com/nextlevelbuilder/goclaw/internal/store"
 	"github.com/nextlevelbuilder/goclaw/pkg/protocol"
@@ -119,14 +120,25 @@ func (h *AgentsHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	req.OwnerID = userID
+
+	// Resolve tenant_id: cross-tenant callers must provide it; others inherit their own tenant.
+	if store.IsCrossTenant(r.Context()) {
+		if req.TenantID == uuid.Nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": i18n.T(locale, i18n.MsgRequired, "tenant_id")})
+			return
+		}
+	} else {
+		req.TenantID = store.TenantIDFromContext(r.Context())
+	}
+
 	if req.AgentType == "" {
 		req.AgentType = store.AgentTypeOpen
 	}
 	if req.ContextWindow <= 0 {
-		req.ContextWindow = 200000
+		req.ContextWindow = config.DefaultContextWindow
 	}
 	if req.MaxToolIterations <= 0 {
-		req.MaxToolIterations = 20
+		req.MaxToolIterations = config.DefaultMaxIterations
 	}
 	if req.Workspace == "" {
 		req.Workspace = fmt.Sprintf("%s/%s", h.defaultWorkspace, req.AgentKey)
@@ -166,7 +178,7 @@ func (h *AgentsHandler) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	// Start LLM summoning in background if applicable
 	if req.Status == store.AgentStatusSummoning {
-		go h.summoner.SummonAgent(req.ID, req.Provider, req.Model, description)
+		go h.summoner.SummonAgent(req.ID, req.TenantID, req.Provider, req.Model, description)
 	}
 
 	emitAudit(h.msgBus, r, "agent.created", "agent", req.ID.String())
@@ -255,14 +267,13 @@ func (h *AgentsHandler) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	// Cascade: if status changed, broadcast so channel instances and cron jobs react.
 	if newStatus, ok := allowed["status"].(string); ok && newStatus != ag.Status {
 		if h.msgBus != nil {
-			h.msgBus.Broadcast(bus.Event{
-				Name: bus.EventAgentStatusChanged,
-				Payload: bus.AgentStatusChangedPayload{
+			bus.BroadcastForTenant(h.msgBus, bus.EventAgentStatusChanged,
+				store.TenantIDFromContext(r.Context()),
+				bus.AgentStatusChangedPayload{
 					AgentID:   id.String(),
 					OldStatus: ag.Status,
 					NewStatus: newStatus,
-				},
-			})
+				})
 		}
 	}
 

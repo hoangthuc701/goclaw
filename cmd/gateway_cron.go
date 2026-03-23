@@ -17,6 +17,10 @@ import (
 // makeCronJobHandler creates a cron job handler that routes through the scheduler's cron lane.
 // This ensures per-session concurrency control (same job can't run concurrently)
 // and integration with /stop, /stopall commands.
+// cronHeartbeatWakeFn holds the heartbeat wake function, set after ticker creation.
+// Safe because cron jobs only fire after Start(), well after this is set.
+var cronHeartbeatWakeFn func(agentID string)
+
 func makeCronJobHandler(sched *scheduler.Scheduler, msgBus *bus.MessageBus, cfg *config.Config, channelMgr *channels.Manager) func(job *store.CronJob) (*store.CronJobResult, error) {
 	return func(job *store.CronJob) (*store.CronJobResult, error) {
 		agentID := job.AgentID
@@ -56,8 +60,11 @@ func makeCronJobHandler(sched *scheduler.Scheduler, msgBus *bus.MessageBus, cfg 
 			)
 		}
 
+		// Build context with tenant scope so agent loop events are scoped correctly.
+		cronCtx := store.WithTenantID(context.Background(), job.TenantID)
+
 		// Schedule through cron lane — scheduler handles agent resolution and concurrency
-		outCh := sched.Schedule(context.Background(), scheduler.LaneCron, agent.RunRequest{
+		outCh := sched.Schedule(cronCtx, scheduler.LaneCron, agent.RunRequest{
 			SessionKey:        sessionKey,
 			Message:           job.Payload.Message,
 			Channel:           channel,
@@ -100,6 +107,11 @@ func makeCronJobHandler(sched *scheduler.Scheduler, msgBus *bus.MessageBus, cfg 
 		if result.Usage != nil {
 			cronResult.InputTokens = result.Usage.PromptTokens
 			cronResult.OutputTokens = result.Usage.CompletionTokens
+		}
+
+		// wakeMode: trigger heartbeat after cron job completes
+		if job.Payload.WakeHeartbeat && cronHeartbeatWakeFn != nil {
+			cronHeartbeatWakeFn(agentID)
 		}
 
 		return cronResult, nil
